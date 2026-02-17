@@ -1,0 +1,27 @@
+{
+  "name": "episki",
+  "version": "1.0.0",
+  "description": "episki desktop app",
+  "main": "dist/main.js",
+  "private": true,
+  "scripts": {
+    "compile": "tsc",
+    "dev": "npm run compile && unset ELECTRON_RUN_AS_NODE && electron .",
+    "build": "npm run compile && electron-builder",
+    "build:mac": "npm run compile && electron-builder --mac",
+    "build:win": "npm run compile && electron-builder --win",
+    "build:linux": "npm run compile && electron-builder --linux"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.0"
+  },
+  "devDependencies": {
+    "electron": "^40.4.1",
+    "electron-builder": "^25.0.0",
+    "electron-icon-builder": "^2.0.1",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.7.0"
+  }
+}

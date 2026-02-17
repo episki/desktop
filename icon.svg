@@ -1,0 +1,21 @@
+<svg
+  width="512"
+  height="512"
+  viewBox="0 0 512 512"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <path
+    d="M256 45.39L76.751 150.695v210.61L256 466.61l179.249-105.305v-210.61z"
+    fill="#1c91fe"
+    stroke="#1c91fe"
+    stroke-width="90.78"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M352.227 256c0-53.145-43.082-96.227-96.227-96.227S159.773 202.855 159.773 256s43.082 96.227 96.227 96.227 96.227-43.082 96.227-96.227z"
+    fill="#043f67"
+    stroke="#fff"
+    stroke-width="36.312"
+    stroke-linejoin="round"
+  />
+</svg>
