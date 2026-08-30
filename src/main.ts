@@ -10,6 +10,7 @@ import {
   PROTOCOL,
 } from './config'
 import log, { logFilePath } from './log'
+import { installDragRegionFallback } from './drag-region'
 import { createMenu } from './menu'
 import { setBadgeCount, showNotification } from './notifications'
 import { offlinePageUrl } from './offline'
@@ -211,6 +212,7 @@ function createWindow(): void {
   mainWindow = win
   rendererReady = false
   trackWindowState(win)
+  installDragRegionFallback(win)
 
   win.once('ready-to-show', () => {
     if (state.isMaximized) win.maximize()
