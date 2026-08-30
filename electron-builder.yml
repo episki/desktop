@@ -8,7 +8,14 @@ protocols:
       - episki
 
 directories:
-  buildResources: icons
+  # build/icon.png (1024x1024) is the single icon source. electron-builder
+  # derives icon.icns, icon.ico and the Linux PNG set from it at pack time, so
+  # there is nothing to generate before building from a fresh clone.
+  # Regenerate it from icon.svg with (see README -- the artwork is rendered at
+  # 824 and padded to 1024 so it matches the macOS icon grid):
+  #   rsvg-convert -w 824 -h 824 icon.svg -o /tmp/icon-824.png
+  #   magick -size 1024x1024 xc:none /tmp/icon-824.png -gravity center -composite build/icon.png
+  buildResources: build
   output: dist-electron
 
 files:
@@ -16,8 +23,9 @@ files:
 
 mac:
   category: public.app-category.business
-  icon: icons/mac/icon.icns
   target:
+    # The zip target is what Squirrel.Mac consumes; without it macOS cannot
+    # auto-update even when the DMG is published.
     - target: dmg
       arch: [universal]
     - target: zip
@@ -26,16 +34,43 @@ mac:
   gatekeeperAssess: false
   entitlements: entitlements.mac.plist
   entitlementsInherit: entitlements.mac.plist
+  # ---------------------------------------------------------------------
+  # CODE SIGNING / NOTARIZATION -- NOT YET CONFIGURED
+  #
+  # macOS will not apply a Squirrel update to an unsigned app: the update
+  # downloads and then silently fails to install. Until the block below is
+  # enabled, treat macOS releases as manual-download only.
+  #
+  # To enable:
+  #   1. Apple Developer Program membership ($99/yr).
+  #   2. Create a "Developer ID Application" certificate, export it as .p12.
+  #   3. Create an app-specific password at appleid.apple.com.
+  #   4. Set these in CI (see .github/workflows/release.yml):
+  #        CSC_LINK                     base64 of the .p12
+  #        CSC_KEY_PASSWORD             .p12 password
+  #        APPLE_ID                     Apple ID email
+  #        APPLE_APP_SPECIFIC_PASSWORD  app-specific password
+  #        APPLE_TEAM_ID                10-char team id
+  #   5. Uncomment:
+  # notarize: true
+  # ---------------------------------------------------------------------
 
 win:
-  icon: icons/win/icon.ico
   target:
     - target: nsis
       arch: [x64, arm64]
+  # ---------------------------------------------------------------------
+  # Unsigned Windows builds trigger a SmartScreen warning on install and on
+  # every update. To enable, obtain an OV/EV code-signing certificate and
+  # uncomment (electron-builder 26 shape):
+  # signtoolOptions:
+  #   certificateFile: ${env.WIN_CSC_LINK}
+  #   certificatePassword: ${env.WIN_CSC_KEY_PASSWORD}
+  # ---------------------------------------------------------------------
 
 linux:
-  icon: icons/png
   target:
+    # Only AppImage supports auto-update; .deb users update via apt/manual.
     - target: AppImage
       arch: [x64]
     - target: deb
@@ -49,4 +84,8 @@ nsis:
 publish:
   provider: github
   owner: episki
-  repo: electron
+  repo: desktop
+  # Without this electron-builder creates a *draft* release. Drafts are not
+  # visible anonymously, so electron-updater clients would find nothing --
+  # artifacts uploaded, no update ever delivered.
+  releaseType: release

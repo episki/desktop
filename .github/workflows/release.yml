@@ -1,0 +1,65 @@
+name: Release
+
+# Cutting a release:
+#   1. Bump "version" in package.json.
+#   2. git tag v1.2.3 && git push origin v1.2.3
+#
+# electron-builder publishes the installers *and* the latest*.yml manifests that
+# electron-updater reads. Without those manifests the app has nothing to check
+# against, which is why no update has ever been delivered so far.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    # Raised only for the job that creates the GitHub release.
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            build: bun run release -- --mac
+          - os: windows-latest
+            build: bun run release -- --win
+          - os: ubuntu-latest
+            build: bun run release -- --linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and publish
+        run: ${{ matrix.build }}
+        env:
+          # Provided automatically; electron-builder uses it to create/update
+          # the GitHub release for the pushed tag.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # ---- macOS signing + notarization (not yet configured) ----
+          # Until these secrets exist, macOS builds ship unsigned and
+          # auto-update cannot apply them. See electron-builder.yml.
+          # CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          # ---- Windows signing (not yet configured) ----
+          # WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          # WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}

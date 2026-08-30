@@ -2,11 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Required by V8. -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-  <true/>
+  <!-- Loading the web app. -->
   <key>com.apple.security.network.client</key>
   <true/>
+  <!--
+    com.apple.security.cs.allow-unsigned-executable-memory was removed: modern
+    Electron does not need it, and it materially weakens the hardened runtime.
+    Re-add it only if the app fails to launch after signing.
+  -->
 </dict>
 </plist>
