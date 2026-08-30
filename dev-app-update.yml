@@ -1,0 +1,6 @@
+# Used only when running `EPISKI_TEST_UPDATER=1 bun run dev`, so the updater can
+# be exercised against real GitHub releases without packaging the app.
+# Must mirror the `publish` block in electron-builder.yml.
+provider: github
+owner: episki
+repo: desktop

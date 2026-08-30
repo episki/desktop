@@ -1,481 +1,423 @@
-import { app, BrowserWindow, shell, ipcMain, Menu, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification } from 'electron'
 import path from 'node:path'
-import { platform } from 'node:os'
-import Store from 'electron-store'
-import { autoUpdater } from 'electron-updater'
-import { config } from 'dotenv'
+import {
+  APP_URL,
+  APP_USER_MODEL_ID,
+  isAppOrigin,
+  isDev,
+  isMac,
+  isWindows,
+  PROTOCOL,
+} from './config'
+import log, { logFilePath } from './log'
+import { createMenu } from './menu'
+import { setBadgeCount, showNotification } from './notifications'
+import { offlinePageUrl } from './offline'
+import { installSecurityPolicy } from './security'
+import {
+  checkForUpdates,
+  downloadUpdate,
+  installUpdate,
+  setupAutoUpdater,
+  updatesEnabled,
+} from './updater'
+import { restoreWindowState, trackWindowState } from './window-state'
+import type {
+  AppInfoPayload,
+  DeepLinkPayload,
+  NotificationRequest,
+  ThemePayload,
+} from './shared/ipc'
 
-// Load environment variables from .env file
-config()
-
-const isMac = platform() === 'darwin'
-const isWindows = platform() === 'win32'
-const isDev = process.env.NODE_ENV === 'development'
-
-// Environment-based URL configuration
-const APP_URL = process.env.APP_URL || (isDev ? 'http://localhost:3000' : 'https://episki.app')
-
-// Define store schema
-interface StoreSchema {
-  windowState: {
-    width: number
-    height: number
-    x?: number
-    y?: number
-    isMaximized: boolean
+// Only load .env in development. In a packaged app the working directory is
+// wherever the launcher happened to be, so this either no-ops or picks up a
+// stray file -- either way it is not a supported configuration channel.
+if (isDev) {
+  try {
+    // Required lazily: dotenv is a devDependency and is absent from builds.
+    ;(require('dotenv') as typeof import('dotenv')).config()
+  }
+  catch {
+    // dotenv is optional
   }
 }
 
-// Initialize store for persisting window state and preferences
-const store = new Store<StoreSchema>({
-  defaults: {
-    windowState: {
-      width: 1400,
-      height: 900,
-      x: undefined,
-      y: undefined,
-      isMaximized: false,
-    },
-  },
-})
+/** Only used in development; packaged builds carry their icon in the bundle. */
+const DEV_ICON = path.join(__dirname, '../build/icon.png')
 
 let mainWindow: BrowserWindow | null = null
+let pendingDeepLink: string | null = null
+/** Set once the renderer has finished a load and can receive IPC. */
+let rendererReady = false
 
-// Register episki:// protocol as default handler
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('episki', process.execPath, [
-      path.resolve(process.argv[1]),
-    ])
-  }
-} else {
-  app.setAsDefaultProtocolClient('episki')
+const getMainWindow = () => mainWindow
+
+// Required for Windows toast notifications and for the taskbar to associate
+// windows with the installed app. Must match `appId` in electron-builder.yml.
+app.setAppUserModelId(APP_USER_MODEL_ID)
+
+// Chromium's Graphite/Dawn backend fails to create a Metal device on some Macs
+// ("Failed to create MTLSharedEvent"), which kills and restarts the GPU process
+// twice during startup before falling back. The fallback renders correctly, so
+// this only skips two doomed process launches -- and it silences the
+// "Failed to create WebGPU Context Provider" errors pages then hit.
+// Command-line switches must be set before the app is ready.
+// Revisit when Electron ships a Chromium with the Dawn/Metal fix.
+if (isMac) {
+  app.commandLine.appendSwitch('disable-features', 'SkiaGraphite')
 }
 
-// Single instance lock for Windows/Linux deep linking
-const gotTheLock = app.requestSingleInstanceLock()
+/* ------------------------------------------------------------------ *
+ * Single instance
+ * ------------------------------------------------------------------ */
 
-if (!gotTheLock) {
+// Bail out immediately when another instance owns the lock. The previous code
+// called app.quit() but then went on to register the ready handler, so a second
+// launch could still start creating windows before the quit landed.
+if (!app.requestSingleInstanceLock()) {
   app.quit()
-} else {
-  // Handle deep links when app is already running (Windows/Linux)
-  app.on('second-instance', (_event, commandLine) => {
-    // commandLine is an array of command line arguments
-    // The deep link URL will be the last argument
-    const url = commandLine.find((arg) => arg.startsWith('episki://'))
-    if (url) {
-      handleDeepLink(url)
-    }
+}
+else {
+  registerProtocolClient()
+  bootstrap()
+}
 
-    // Focus the window if it exists and is not destroyed
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
+function registerProtocolClient(): void {
+  if (process.defaultApp) {
+    // Running via `electron .` -- the protocol handler has to point back at the
+    // electron binary plus this project's entry point.
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+        path.resolve(process.argv[1]!),
+      ])
+    }
+  }
+  else {
+    app.setAsDefaultProtocolClient(PROTOCOL)
+  }
+}
+
+function bootstrap(): void {
+  app.on('second-instance', (_event, commandLine) => {
+    const url = commandLine.find(arg => arg.startsWith(`${PROTOCOL}://`))
+    if (url) handleDeepLink(url)
+    focusMainWindow()
+  })
+
+  // Registered synchronously at module scope: on macOS `open-url` can fire
+  // before the app is ready when a link launches the app cold.
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    handleDeepLink(url)
+  })
+
+  app.whenReady().then(onReady).catch((error: unknown) => {
+    log.error('[Main] Failed to start:', error)
+  })
+
+  app.on('window-all-closed', () => {
+    if (!isMac) app.quit()
+  })
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+    }
+    else {
+      focusMainWindow()
     }
   })
 }
 
-// Store pending deep link if window isn't ready yet
-let pendingDeepLink: string | null = null
+function onReady(): void {
+  log.info(`[Main] Starting episki ${app.getVersion()} (${process.platform}), log: ${logFilePath()}`)
 
-// Create native application menu
-function createMenu() {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? [
-          {
-            label: app.name,
-            submenu: [
-              { role: 'about' as const },
-              { type: 'separator' as const },
-              { role: 'services' as const },
-              { type: 'separator' as const },
-              { role: 'hide' as const },
-              { role: 'hideOthers' as const },
-              { role: 'unhide' as const },
-              { type: 'separator' as const },
-              { role: 'quit' as const },
-            ],
-          },
-        ]
-      : []),
-    {
-      label: 'File',
-      submenu: [
-        isMac ? { role: 'close' as const } : { role: 'quit' as const },
-      ],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' as const },
-        { role: 'redo' as const },
-        { type: 'separator' as const },
-        { role: 'cut' as const },
-        { role: 'copy' as const },
-        { role: 'paste' as const },
-        ...(isMac
-          ? [
-              { role: 'pasteAndMatchStyle' as const },
-              { role: 'delete' as const },
-              { role: 'selectAll' as const },
-            ]
-          : [
-              { role: 'delete' as const },
-              { type: 'separator' as const },
-              { role: 'selectAll' as const },
-            ]),
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' as const },
-        { role: 'forceReload' as const },
-        { role: 'toggleDevTools' as const },
-        { type: 'separator' as const },
-        { role: 'resetZoom' as const },
-        { role: 'zoomIn' as const },
-        { role: 'zoomOut' as const },
-        { type: 'separator' as const },
-        { role: 'togglefullscreen' as const },
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' as const },
-        { role: 'zoom' as const },
-        ...(isMac
-          ? [
-              { type: 'separator' as const },
-              { role: 'front' as const },
-              { type: 'separator' as const },
-              { role: 'window' as const },
-            ]
-          : [
-              { role: 'close' as const },
-            ]),
-      ],
-    },
-    {
-      label: 'Help',
-      submenu: [
-        {
-          label: 'Learn More',
-          click: async () => {
-            await shell.openExternal('https://episki.app')
-          },
-        },
-        {
-          label: 'Help & Support',
-          click: async () => {
-            await shell.openExternal('https://intercom.help/episki/en/')
-          },
-        },
-      ],
-    },
-  ]
-
-  const menu = Menu.buildFromTemplate(template)
-  Menu.setApplicationMenu(menu)
-}
-
-// Handle deep link URLs
-function handleDeepLink(url: string) {
-  console.log('[Deep Link] Received:', url)
-
-  if (!mainWindow) {
-    console.log('[Deep Link] Window not ready, storing for later')
-    pendingDeepLink = url
-    return
-  }
-
-  try {
-    // Parse the deep link URL (e.g., episki://auth/callback?code=...)
-    const parsed = new URL(url)
-    const path = parsed.pathname + parsed.search + parsed.hash
-
-    console.log('[Deep Link] Sending to renderer:', path)
-
-    // Send the deep link to the renderer process instead of reloading the window
-    // This allows the already-loaded web app to handle the OAuth callback
-    mainWindow.webContents.send('deep-link', {
-      url: url,
-      path: path,
+  if (isMac) {
+    app.setActivationPolicy('regular')
+    app.setAboutPanelOptions({
+      applicationName: 'episki',
+      applicationVersion: app.getVersion(),
+      copyright: 'Copyright (c) episki',
     })
+  }
 
-    // Focus the window
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
+  installSecurityPolicy()
+  watchTheme()
+  setupAutoUpdater(getMainWindow)
+  createMenu()
+  registerIpcHandlers()
 
-    pendingDeepLink = null
-  } catch (error) {
-    console.error('[Deep Link] Failed to parse:', error)
+  // A packaged build takes its icon from the app bundle, which electron-builder
+  // generates from build/icon.png. In development the process is Electron.app,
+  // so the dock shows Electron's own icon unless we override it here.
+  if (isMac && app.dock) {
+    if (isDev) {
+      try {
+        app.dock.setIcon(DEV_ICON)
+      }
+      catch (error) {
+        log.warn('[Main] Could not set dev dock icon:', error)
+      }
+    }
+    void app.dock.show()
+  }
+
+  createWindow()
+
+  // On macOS a cold launch from a deep link may arrive as an argv entry rather
+  // than an open-url event.
+  const launchDeepLink = process.argv.find(arg => arg.startsWith(`${PROTOCOL}://`))
+  if (launchDeepLink) {
+    log.info('[Deep Link] Found on launch:', launchDeepLink)
+    handleDeepLink(launchDeepLink)
   }
 }
 
-function createWindow() {
-  // Restore window state from store
-  const windowState = store.get('windowState')
+/* ------------------------------------------------------------------ *
+ * Window
+ * ------------------------------------------------------------------ */
+
+function createWindow(): void {
+  const state = restoreWindowState()
 
   const win = new BrowserWindow({
-    width: windowState.width,
-    height: windowState.height,
-    x: windowState.x,
-    y: windowState.y,
+    width: state.width,
+    height: state.height,
+    x: state.x,
+    y: state.y,
     minWidth: 1024,
     minHeight: 700,
 
-    // macOS: hidden title bar with native traffic lights
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: isMac ? { x: 16, y: 18 } : undefined,
+    frame: !isWindows,
 
-    // Windows: frameless for custom title bar
-    frame: isWindows ? false : true,
+    // Matching the OS theme avoids a bright white flash on launch for dark-mode
+    // users; `show: false` avoids the flash of an empty window entirely.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b1220' : '#ffffff',
+    show: false,
 
-    backgroundColor: '#ffffff',
-    // show: false removed - window will show immediately
-    icon: path.join(__dirname, '../icons/png/256x256.png'),
+    ...(isDev && !isMac ? { icon: DEV_ICON } : {}),
 
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      spellcheck: true,
     },
   })
 
   mainWindow = win
+  rendererReady = false
+  trackWindowState(win)
 
-  // Restore maximized state
-  if (windowState.isMaximized) {
-    win.maximize()
-  }
+  win.once('ready-to-show', () => {
+    if (state.isMaximized) win.maximize()
+    if (state.isFullScreen) win.setFullScreen(true)
+    win.show()
+    win.focus()
+    if (isMac) app.focus({ steal: true })
+  })
 
-  // Save window state on resize, move, and maximize/unmaximize
-  const saveWindowState = () => {
-    const bounds = win.getBounds()
-    store.set('windowState', {
-      width: bounds.width,
-      height: bounds.height,
-      x: bounds.x,
-      y: bounds.y,
-      isMaximized: win.isMaximized(),
-    })
-  }
+  // ready-to-show never fires if the very first load fails, so make sure the
+  // window still appears to show the offline page.
+  const showFallback = setTimeout(() => {
+    if (!win.isDestroyed() && !win.isVisible()) win.show()
+  }, 10_000)
+  win.once('closed', () => clearTimeout(showFallback))
 
-  win.on('resize', saveWindowState)
-  win.on('move', saveWindowState)
-  win.on('maximize', saveWindowState)
-  win.on('unmaximize', saveWindowState)
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // -3 is ERR_ABORTED, which fires for ordinary client-side navigations.
+    if (!isMainFrame || errorCode === -3) return
+    log.error(`[Main] Load failed (${errorCode} ${errorDescription}): ${validatedURL}`)
+    void win.loadURL(offlinePageUrl(`${errorDescription} (${errorCode})`))
+  })
 
-  win.loadURL(APP_URL)
-
-  // Defer activation to allow app to finish launching (critical for production builds)
-  setImmediate(() => {
-    if (win && !win.isDestroyed()) {
-      // Explicitly focus the window after creation
-      win.focus()
-
-      // On macOS, bring app to foreground
-      if (isMac) {
-        // Use focus with steal to force the app to the foreground
-        app.focus({ steal: true })
-      }
+  // Recover from a renderer crash, but give up after a few attempts rather than
+  // reloading forever into whatever is causing the crash.
+  let crashReloads = 0
+  win.webContents.on('render-process-gone', (_event, details) => {
+    log.error('[Main] Renderer gone:', details.reason, details.exitCode)
+    if (details.reason === 'clean-exit' || win.isDestroyed()) return
+    if (crashReloads >= 3) {
+      log.error('[Main] Too many renderer crashes, showing the error page')
+      void win.loadURL(offlinePageUrl(`The app kept crashing (${details.reason})`))
+      return
     }
+    crashReloads += 1
+    void win.loadURL(APP_URL)
   })
 
-  // Handle pending deep links after page loads
-  win.webContents.once('did-finish-load', () => {
-    if (pendingDeepLink) {
-      console.log('[Deep Link] Processing pending deep link:', pendingDeepLink)
-      handleDeepLink(pendingDeepLink)
-    }
+  win.webContents.on('did-finish-load', () => {
+    // A successful load means we are out of the crash loop.
+    crashReloads = 0
+
+    // The renderer has mounted and registered its IPC listeners, so anything
+    // that arrived during startup can be delivered now. This has to stay a
+    // persistent listener, not `once`: the app redirects after its first load
+    // (/ -> /hub), and a spent one-shot handler is how OAuth callbacks were
+    // being queued and then silently dropped.
+    rendererReady = true
+    flushPendingDeepLink()
   })
 
-  if (isDev) {
-    win.webContents.openDevTools()
-  }
+  win.on('unresponsive', () => log.warn('[Main] Window became unresponsive'))
+  win.on('responsive', () => log.info('[Main] Window responsive again'))
 
-  // Open external links in default browser
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(APP_URL)) {
-      shell.openExternal(url)
-      return { action: 'deny' }
-    }
-    return { action: 'allow' }
-  })
+  win.on('maximize', () => win.webContents.send('window-maximized-change', true))
+  win.on('unmaximize', () => win.webContents.send('window-maximized-change', false))
+  win.on('enter-full-screen', () => win.webContents.send('window-fullscreen-change', true))
+  win.on('leave-full-screen', () => win.webContents.send('window-fullscreen-change', false))
 
-  // Intercept navigation to external URLs
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(APP_URL)) {
-      event.preventDefault()
-      shell.openExternal(url)
-    }
+  // A focused window has been seen, so stop nagging the taskbar.
+  win.on('focus', () => {
+    if (!isMac) win.flashFrame(false)
   })
 
-  win.on('maximize', () => {
-    win.webContents.send('window-maximized-change', true)
-  })
-  win.on('unmaximize', () => {
-    win.webContents.send('window-maximized-change', false)
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
   })
 
-  // Sync OS theme changes to the app
-  nativeTheme.on('updated', () => {
-    if (!win.isDestroyed()) {
-      win.webContents.send('theme-updated', {
-        shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
-        themeSource: nativeTheme.themeSource,
-      })
-    }
-  })
+  void win.loadURL(APP_URL)
+
+  if (isDev) win.webContents.openDevTools({ mode: 'detach' })
 }
 
-// Configure auto-updater
-function setupAutoUpdater() {
-  if (isDev) {
-    console.log('[Auto-Updater] Disabled in development mode')
+function focusMainWindow(): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  if (!win.isVisible()) win.show()
+  win.focus()
+}
+
+/* ------------------------------------------------------------------ *
+ * Deep links
+ * ------------------------------------------------------------------ */
+
+function handleDeepLink(url: string): void {
+  log.info('[Deep Link] Received:', url)
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  }
+  catch (error) {
+    log.error('[Deep Link] Failed to parse:', error)
     return
   }
 
-  // Don't automatically download updates
-  autoUpdater.autoDownload = false
+  if (parsed.protocol !== `${PROTOCOL}:`) {
+    log.warn('[Deep Link] Ignoring unexpected protocol:', parsed.protocol)
+    return
+  }
 
-  autoUpdater.on('checking-for-update', () => {
-    console.log('[Auto-Updater] Checking for updates...')
-  })
+  const win = mainWindow
+  // Gate on the renderer having mounted, not on isLoading(): the page keeps
+  // navigating after its first load, so isLoading() is true often enough that
+  // it dropped real callbacks.
+  if (!win || win.isDestroyed() || !rendererReady) {
+    log.info('[Deep Link] Renderer not ready, queuing')
+    pendingDeepLink = url
+    return
+  }
 
-  autoUpdater.on('update-available', (info) => {
-    console.log('[Auto-Updater] Update available:', info.version)
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('update-available', info)
-    }
-  })
+  // `episki://auth/callback?code=...` parses with host "auth" and pathname
+  // "/callback", so the host has to be folded back into the route.
+  const routePath = `/${parsed.host}${parsed.pathname}`.replace(/\/+$/, '') || '/'
+  const payload: DeepLinkPayload = {
+    url,
+    path: `${routePath}${parsed.search}${parsed.hash}`,
+  }
 
-  autoUpdater.on('update-not-available', () => {
-    console.log('[Auto-Updater] No updates available')
-  })
-
-  autoUpdater.on('error', (err) => {
-    console.error('[Auto-Updater] Error:', err)
-  })
-
-  autoUpdater.on('download-progress', (progress) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('update-download-progress', progress)
-    }
-  })
-
-  autoUpdater.on('update-downloaded', (info) => {
-    console.log('[Auto-Updater] Update downloaded:', info.version)
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('update-downloaded', info)
-    }
-  })
-
-  // Check for updates on startup (after 5 seconds)
-  setTimeout(() => {
-    autoUpdater.checkForUpdates()
-  }, 5000)
-
-  // Check for updates every 4 hours
-  setInterval(() => {
-    autoUpdater.checkForUpdates()
-  }, 4 * 60 * 60 * 1000)
+  log.info('[Deep Link] Sending to renderer:', payload.path)
+  win.webContents.send('deep-link', payload)
+  focusMainWindow()
 }
 
-// IPC handlers for auto-updater
-ipcMain.on('download-update', () => {
-  autoUpdater.downloadUpdate()
-})
-
-ipcMain.on('install-update', () => {
-  autoUpdater.quitAndInstall()
-})
-
-// IPC handlers for window controls (Windows/Linux frameless)
-ipcMain.on('window-minimize', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.minimize()
-  }
-})
-
-ipcMain.on('window-maximize', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
-  }
-})
-
-ipcMain.on('window-close', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.close()
-  }
-})
-
-ipcMain.handle('window-is-maximized', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    return mainWindow.isMaximized()
-  }
-  return false
-})
-
-// macOS about panel
-if (isMac) {
-  app.setAboutPanelOptions({
-    applicationName: 'episki',
-    applicationVersion: app.getVersion(),
-    copyright: 'Copyright (c) episki',
-  })
-}
-
-app.whenReady().then(() => {
-  // On macOS, ensure the app can be activated
-  if (isMac) {
-    app.setActivationPolicy('regular')
-  }
-
-  // Create native application menu
-  createMenu()
-
-  // Set up auto-updater
-  setupAutoUpdater()
-
-  if (isMac && app.dock) {
-    app.dock.setIcon(path.join(__dirname, '../icons/png/256x256.png'))
-    // Ensure the app is visible and can be activated
-    app.dock.show()
-  }
-  createWindow()
-
-  // On macOS, check if we were launched via a deep link
-  // (the URL might have been passed as a command line argument)
-  if (isMac && process.argv.length >= 2) {
-    const deepLinkUrl = process.argv.find((arg) => arg.startsWith('episki://'))
-    if (deepLinkUrl) {
-      console.log('[Deep Link] Found deep link on launch:', deepLinkUrl)
-      handleDeepLink(deepLinkUrl)
-    }
-  }
-})
-
-app.on('window-all-closed', () => {
-  if (!isMac) app.quit()
-})
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow()
-  } else if (mainWindow && !mainWindow.isDestroyed()) {
-    // Show and focus the existing window
-    mainWindow.show()
-    mainWindow.focus()
-  }
-})
-
-// Handle deep links on macOS (open-url event)
-app.on('open-url', (event, url) => {
-  event.preventDefault()
+function flushPendingDeepLink(): void {
+  const url = pendingDeepLink
+  if (!url) return
+  // Cleared before dispatch so a re-queue cannot loop.
+  pendingDeepLink = null
+  log.info('[Deep Link] Processing queued link:', url)
   handleDeepLink(url)
-})
+}
+
+/* ------------------------------------------------------------------ *
+ * Theme
+ * ------------------------------------------------------------------ */
+
+function watchTheme(): void {
+  nativeTheme.on('updated', () => {
+    const win = mainWindow
+    if (!win || win.isDestroyed()) return
+    const payload: ThemePayload = {
+      shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+      themeSource: nativeTheme.themeSource,
+    }
+    win.webContents.send('theme-updated', payload)
+  })
+}
+
+/* ------------------------------------------------------------------ *
+ * IPC
+ * ------------------------------------------------------------------ */
+
+function registerIpcHandlers(): void {
+  ipcMain.on('window-minimize', () => mainWindow?.minimize())
+  ipcMain.on('window-maximize', () => {
+    const win = mainWindow
+    if (!win || win.isDestroyed()) return
+    win.isMaximized() ? win.unmaximize() : win.maximize()
+  })
+  ipcMain.on('window-close', () => mainWindow?.close())
+  ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized() ?? false)
+
+  ipcMain.on('check-for-updates', () => checkForUpdates({ userInitiated: true }))
+  ipcMain.on('download-update', () => downloadUpdate())
+  ipcMain.on('install-update', () => installUpdate())
+
+  ipcMain.on('retry-load', () => {
+    const win = mainWindow
+    if (!win || win.isDestroyed()) return
+    log.info('[Main] Retrying load of', APP_URL)
+    void win.loadURL(APP_URL)
+  })
+
+  ipcMain.handle('show-notification', (event, request: NotificationRequest) => {
+    if (!isTrustedSender(event.senderFrame?.url)) {
+      return { shown: false, id: '', reason: 'error' as const }
+    }
+    return showNotification(mainWindow, request)
+  })
+
+  ipcMain.on('set-badge-count', (event, count: number) => {
+    if (!isTrustedSender(event.senderFrame?.url)) return
+    setBadgeCount(mainWindow, count)
+  })
+
+  ipcMain.handle('notifications-supported', () => Notification.isSupported())
+
+  ipcMain.handle('app-info', (): AppInfoPayload => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    updatesSupported: updatesEnabled(),
+    logPath: logFilePath(),
+  }))
+}
+
+/**
+ * Notifications and badges are user-visible OS surfaces, so only accept them
+ * from a frame actually running our own app.
+ */
+function isTrustedSender(url: string | undefined): boolean {
+  if (!url) return false
+  if (!isAppOrigin(url)) {
+    log.warn('[Main] Rejected privileged IPC from', url)
+    return false
+  }
+  return true
+}

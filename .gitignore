@@ -1,12 +1,7 @@
 node_modules/
 dist/
 dist-electron/
-build/
 release/
-icons/
-*.png
-*.icns
-*.ico
 
 # Environment variables
 .env
