@@ -3,7 +3,11 @@
 # waiting for a security advisory to force the issue.
 version: 2
 updates:
-  - package-ecosystem: npm
+  # Version updates run through the `bun` ecosystem so Dependabot regenerates
+  # bun.lock alongside package.json. The `npm` ecosystem does not understand
+  # bun.lock and leaves it stale, which fails `bun install --frozen-lockfile`
+  # in CI.
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly
@@ -20,6 +24,29 @@ updates:
         exclude-patterns:
           - electron
           - electron-builder
+    ignore:
+      # TypeScript 7 is the native port and removes `moduleResolution: node10`,
+      # which this tsconfig uses -- `tsc --noEmit` fails outright on 7.0.2.
+      # Moving to it is a migration, not a bump. Revisit deliberately.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      # @types/node should match the Node that Electron actually bundles
+      # (Electron 44 -> Node 22 -> types 24). Bump it together with Electron
+      # rather than independently.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+
+  # Dependabot's bun ecosystem does not support security updates, so npm stays
+  # enabled for those alone. `open-pull-requests-limit: 0` disables its version
+  # updates while leaving security updates active.
+  #
+  # NOTE: an npm security PR will not update bun.lock, so CI will fail on it by
+  # design. Check the branch out, run `bun install`, and push the lockfile.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
 
   # Keeps the pinned action SHAs below from going stale.
   - package-ecosystem: github-actions
