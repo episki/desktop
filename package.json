@@ -21,7 +21,7 @@
     "electron": "^40.4.1",
     "electron-builder": "^25.0.0",
     "electron-icon-builder": "^2.0.1",
-    "esbuild": "^0.27.3",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.0"
   }
 }
