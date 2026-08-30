@@ -14,41 +14,74 @@ import log from './log'
  */
 
 const STRIP_HEIGHT = 38
-const ELEMENT_ID = '__episki_drag_strip'
+const ID_PREFIX = '__episki_drag_'
 
+/**
+ * Lays drag strips across the top band, skipping any horizontal range occupied
+ * by something clickable, so a window is always movable by its empty chrome
+ * without ever swallowing a control.
+ *
+ * A single full-width strip is not enough: the app puts its workspace switcher
+ * in that band, and a draggable region wins the hit test over whatever it
+ * covers -- `pointer-events: none` does not exempt it, because Chromium
+ * resolves drag regions before DOM hit testing.
+ *
+ * Re-run after hydration as well as on load: an SPA renders its own chrome
+ * after the first paint, so a single check at load time sees an empty page and
+ * draws strips over controls that do not exist yet.
+ */
 const SCRIPT = `(() => {
-  const ID = ${JSON.stringify(ELEMENT_ID)}
-  const existing = document.getElementById(ID)
+  const HEIGHT = ${STRIP_HEIGHT}
+  const PREFIX = ${JSON.stringify(ID_PREFIX)}
+  const MIN_WIDTH = 24
 
-  const pageHasDragRegion = Array.prototype.some.call(
-    document.querySelectorAll('*'),
-    el => el.id !== ID
-      && getComputedStyle(el).getPropertyValue('-webkit-app-region').trim() === 'drag',
-  )
-
-  if (pageHasDragRegion) {
-    if (existing) existing.remove()
-    return 'page-provides-drag-region'
-  }
-  if (existing) return 'already-installed'
+  const previous = document.querySelectorAll('[id^="' + PREFIX + '"]')
+  previous.forEach(el => el.remove())
   if (!document.body) return 'no-body'
 
-  const strip = document.createElement('div')
-  strip.id = ID
-  // pointer-events:none so the strip never swallows a click meant for the page;
-  // Chromium still honours the drag region.
-  strip.style.cssText = [
-    'position:fixed',
-    'top:0',
-    'left:0',
-    'right:0',
-    'height:${STRIP_HEIGHT}px',
-    'z-index:2147483647',
-    'pointer-events:none',
-    '-webkit-app-region:drag',
-  ].join(';')
-  document.body.appendChild(strip)
-  return 'installed'
+  const width = window.innerWidth
+  const interactive = document.querySelectorAll(
+    'a,button,input,select,textarea,summary,label,' +
+    '[role="button"],[role="link"],[role="combobox"],[role="menuitem"],[role="tab"],' +
+    '[contenteditable="true"],[tabindex]:not([tabindex="-1"])',
+  )
+
+  const spans = []
+  for (const el of interactive) {
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) continue
+    if (r.top >= HEIGHT || r.bottom <= 0) continue
+    spans.push([Math.max(0, r.left), Math.min(width, r.right)])
+  }
+  spans.sort((a, b) => a[0] - b[0])
+
+  const gaps = []
+  let cursor = 0
+  for (const [left, right] of spans) {
+    if (left > cursor) gaps.push([cursor, left])
+    if (right > cursor) cursor = right
+  }
+  if (cursor < width) gaps.push([cursor, width])
+
+  let made = 0
+  for (const [left, right] of gaps) {
+    if (right - left < MIN_WIDTH) continue
+    const strip = document.createElement('div')
+    strip.id = PREFIX + made
+    strip.style.cssText = [
+      'position:fixed',
+      'top:0',
+      'left:' + left + 'px',
+      'width:' + (right - left) + 'px',
+      'height:' + HEIGHT + 'px',
+      'z-index:2147483647',
+      'pointer-events:none',
+      '-webkit-app-region:drag',
+    ].join(';')
+    document.body.appendChild(strip)
+    made++
+  }
+  return 'strips:' + made + ' skipped-controls:' + spans.length
 })()`
 
 async function apply(contents: WebContents): Promise<void> {
@@ -62,13 +95,34 @@ async function apply(contents: WebContents): Promise<void> {
   }
 }
 
+/**
+ * Recomputed after load and again as the app hydrates and renders its chrome.
+ * A single pass at did-finish-load runs before the header exists.
+ */
+const RECHECK_DELAYS_MS = [300, 1000, 3000]
+
 export function installDragRegionFallback(win: BrowserWindow): void {
   // Only frameless/hidden-titlebar windows need this; Linux keeps its frame.
   if (!isMac && !isWindows) return
 
   const contents = win.webContents
-  void apply(contents)
-  contents.on('did-finish-load', () => void apply(contents))
+  const timers: NodeJS.Timeout[] = []
+
+  const refresh = () => {
+    void apply(contents)
+    for (const delay of RECHECK_DELAYS_MS) {
+      timers.push(setTimeout(() => void apply(contents), delay))
+    }
+  }
+
+  refresh()
+  contents.on('did-finish-load', refresh)
   // The app is a SPA, so most route changes never fire did-finish-load.
-  contents.on('did-navigate-in-page', () => void apply(contents))
+  contents.on('did-navigate-in-page', refresh)
+  // Layout changes with the window, so the gaps have to be recomputed.
+  win.on('resize', () => void apply(contents))
+
+  win.on('closed', () => {
+    for (const timer of timers) clearTimeout(timer)
+  })
 }
