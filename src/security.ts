@@ -55,6 +55,17 @@ function harden(contents: WebContents): void {
     openExternal(url)
   })
 
+  // will-navigate only covers navigations the page starts. An HTTP 3xx during
+  // an allowed navigation -- including the initial loadURL(APP_URL) -- surfaces
+  // as will-redirect, and without this a redirect could cross origins and stay
+  // inside the window.
+  contents.on('will-redirect', (event, url) => {
+    if (isAllowedUrl(url)) return
+    log.warn('[Security] Blocked cross-origin redirect to', new URL(url).origin)
+    event.preventDefault()
+    openExternal(url)
+  })
+
   // The app has no need for <webview>; refuse to attach one and strip any
   // preload/nodeIntegration an injected tag might try to request.
   contents.on('will-attach-webview', (event, webPreferences, params) => {

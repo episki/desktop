@@ -30,18 +30,8 @@ import type {
   ThemePayload,
 } from './shared/ipc'
 
-// Only load .env in development. In a packaged app the working directory is
-// wherever the launcher happened to be, so this either no-ops or picks up a
-// stray file -- either way it is not a supported configuration channel.
-if (isDev) {
-  try {
-    // Required lazily: dotenv is a devDependency and is absent from builds.
-    ;(require('dotenv') as typeof import('dotenv')).config()
-  }
-  catch {
-    // dotenv is optional
-  }
-}
+/** A renderer that stays up this long is treated as recovered. */
+const CRASH_RESET_MS = 60_000
 
 /** Only used in development; packaged builds carry their icon in the bundle. */
 const DEV_ICON = path.join(__dirname, '../build/icon.png')
@@ -169,7 +159,7 @@ function onReady(): void {
   // than an open-url event.
   const launchDeepLink = process.argv.find(arg => arg.startsWith(`${PROTOCOL}://`))
   if (launchDeepLink) {
-    log.info('[Deep Link] Found on launch:', launchDeepLink)
+    log.info('[Deep Link] Found on launch:', redact(launchDeepLink))
     handleDeepLink(launchDeepLink)
   }
 }
@@ -237,11 +227,20 @@ function createWindow(): void {
   })
 
   // Recover from a renderer crash, but give up after a few attempts rather than
-  // reloading forever into whatever is causing the crash.
+  // reloading forever into whatever is causing the crash. The counter is reset
+  // by a quiet period, not by a successful load: a crash loop reloads
+  // successfully every time, so resetting on did-finish-load made the cap
+  // unreachable.
   let crashReloads = 0
+  let lastCrashAt = 0
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('[Main] Renderer gone:', details.reason, details.exitCode)
     if (details.reason === 'clean-exit' || win.isDestroyed()) return
+
+    const now = Date.now()
+    if (now - lastCrashAt > CRASH_RESET_MS) crashReloads = 0
+    lastCrashAt = now
+
     if (crashReloads >= 3) {
       log.error('[Main] Too many renderer crashes, showing the error page')
       void win.loadURL(offlinePageUrl(`The app kept crashing (${details.reason})`))
@@ -252,9 +251,6 @@ function createWindow(): void {
   })
 
   win.webContents.on('did-finish-load', () => {
-    // A successful load means we are out of the crash loop.
-    crashReloads = 0
-
     // The renderer has mounted and registered its IPC listeners, so anything
     // that arrived during startup can be delivered now. This has to stay a
     // persistent listener, not `once`: the app redirects after its first load
@@ -298,8 +294,28 @@ function focusMainWindow(): void {
  * Deep links
  * ------------------------------------------------------------------ */
 
+/**
+ * Deep links carry OAuth `code` and `state` in the query string, and the log
+ * file is something users are asked to send to support. Log the route only.
+ */
+function redact(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const suffix = parsed.search || parsed.hash ? ' (query redacted)' : ''
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}${suffix}`
+  }
+  catch {
+    return '<unparseable url>'
+  }
+}
+
+function redactPath(routePath: string): string {
+  const cut = routePath.search(/[?#]/)
+  return cut === -1 ? routePath : `${routePath.slice(0, cut)} (query redacted)`
+}
+
 function handleDeepLink(url: string): void {
-  log.info('[Deep Link] Received:', url)
+  log.info('[Deep Link] Received:', redact(url))
 
   let parsed: URL
   try {
@@ -333,7 +349,7 @@ function handleDeepLink(url: string): void {
     path: `${routePath}${parsed.search}${parsed.hash}`,
   }
 
-  log.info('[Deep Link] Sending to renderer:', payload.path)
+  log.info('[Deep Link] Sending to renderer:', redactPath(payload.path))
   win.webContents.send('deep-link', payload)
   focusMainWindow()
 }
@@ -343,7 +359,7 @@ function flushPendingDeepLink(): void {
   if (!url) return
   // Cleared before dispatch so a re-queue cannot loop.
   pendingDeepLink = null
-  log.info('[Deep Link] Processing queued link:', url)
+  log.info('[Deep Link] Processing queued link:', redact(url))
   handleDeepLink(url)
 }
 
@@ -406,7 +422,7 @@ function registerIpcHandlers(): void {
     version: app.getVersion(),
     platform: process.platform,
     isPackaged: app.isPackaged,
-    updatesSupported: updatesEnabled(),
+    updatesEnabled: updatesEnabled(),
     logPath: logFilePath(),
   }))
 }

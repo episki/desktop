@@ -80,8 +80,14 @@ export interface AppInfoPayload {
   version: string
   platform: NodeJS.Platform
   isPackaged: boolean
-  /** False in development and in unsigned builds where updates cannot apply. */
-  updatesSupported: boolean
+  /**
+   * Whether the updater is wired up at all -- false in development.
+   *
+   * This is not a promise that an update will install: macOS additionally
+   * requires a signed build, and there is no runtime API to check that, so an
+   * unsigned packaged build still reports true.
+   */
+  updatesEnabled: boolean
   logPath: string
 }
 

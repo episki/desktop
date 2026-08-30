@@ -1,5 +1,20 @@
 import { app } from 'electron'
 
+/**
+ * Loaded here rather than in main.ts: static imports are evaluated before the
+ * importing module's body, so a dotenv call in main.ts ran *after* this module
+ * had already frozen APP_URL -- the documented .env override never applied.
+ */
+if (!app.isPackaged) {
+  try {
+    // Required lazily: dotenv is a devDependency and is absent from builds.
+    ;(require('dotenv') as typeof import('dotenv')).config()
+  }
+  catch {
+    // dotenv is optional
+  }
+}
+
 export const isMac = process.platform === 'darwin'
 export const isWindows = process.platform === 'win32'
 

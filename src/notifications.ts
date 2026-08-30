@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron'
+import { app, BrowserWindow, nativeImage, Notification } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { isMac, isWindows } from './config'
 import log from './log'
@@ -61,27 +61,71 @@ function focusWindow(win: BrowserWindow | null): void {
   if (isMac) app.focus({ steal: true })
 }
 
+const OVERLAY_SIZE = 16
+
 /**
- * Unread count on the macOS dock, the Windows taskbar and Unity launchers.
- * Pass 0 to clear.
+ * A 16x16 dot for the Windows taskbar overlay. Windows has no numeric badge
+ * API, and app.setBadgeCount is macOS/Linux only, so a positive count has to be
+ * drawn. Built as raw BGRA rather than loaded from disk so there is no asset to
+ * package.
+ */
+function badgeOverlay(): Electron.NativeImage {
+  const buffer = Buffer.alloc(OVERLAY_SIZE * OVERLAY_SIZE * 4)
+  const centre = (OVERLAY_SIZE - 1) / 2
+  const radius = OVERLAY_SIZE / 2
+
+  for (let y = 0; y < OVERLAY_SIZE; y++) {
+    for (let x = 0; x < OVERLAY_SIZE; x++) {
+      const i = (y * OVERLAY_SIZE + x) * 4
+      const distance = Math.hypot(x - centre, y - centre)
+      // One pixel of feathering so the dot does not look jagged.
+      const coverage = Math.max(0, Math.min(1, radius - distance))
+      buffer[i] = 0x3b // B
+      buffer[i + 1] = 0x30 // G
+      buffer[i + 2] = 0xe0 // R
+      buffer[i + 3] = Math.round(coverage * 255)
+    }
+  }
+
+  return nativeImage.createFromBitmap(buffer, {
+    width: OVERLAY_SIZE,
+    height: OVERLAY_SIZE,
+  })
+}
+
+/**
+ * Unread indicator. macOS and Linux get a numeric badge; Windows has no numeric
+ * API, so it gets a taskbar overlay dot with the count in its accessible
+ * description. Pass 0 to clear.
  */
 export function setBadgeCount(win: BrowserWindow | null, count: number): void {
   const safe = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0
 
-  try {
-    app.setBadgeCount(safe)
-  }
-  catch (error) {
-    log.warn('[Notifications] setBadgeCount failed:', error)
+  if (!isWindows) {
+    try {
+      app.setBadgeCount(safe)
+    }
+    catch (error) {
+      log.warn('[Notifications] setBadgeCount failed:', error)
+    }
   }
 
-  // Windows and most Linux WMs have no dock badge, so nudge the taskbar entry
-  // instead -- but only when the user is not already looking at the window.
-  if (!isMac && win && !win.isDestroyed()) {
+  if (!win || win.isDestroyed()) return
+
+  if (isWindows) {
+    try {
+      win.setOverlayIcon(
+        safe > 0 ? badgeOverlay() : null,
+        safe > 0 ? `${safe} unread` : '',
+      )
+    }
+    catch (error) {
+      log.warn('[Notifications] setOverlayIcon failed:', error)
+    }
+  }
+
+  // Nudge the taskbar entry too, but only when the user is not already looking.
+  if (!isMac) {
     win.flashFrame(safe > 0 && !win.isFocused())
-  }
-
-  if (isWindows && win && !win.isDestroyed() && safe === 0) {
-    win.setOverlayIcon(null, '')
   }
 }

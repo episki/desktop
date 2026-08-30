@@ -85,3 +85,7 @@ publish:
   provider: github
   owner: episki
   repo: desktop
+  # Without this electron-builder creates a *draft* release. Drafts are not
+  # visible anonymously, so electron-updater clients would find nothing --
+  # artifacts uploaded, no update ever delivered.
+  releaseType: release

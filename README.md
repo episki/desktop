@@ -7,7 +7,7 @@ Electron wrapper for the episki GRC platform.
 - **Window State Persistence** — size, position, maximized and full-screen state, validated against the current display layout so the window never restores off-screen
 - **Native Menu Bar** — standard File/Edit/View/Window/Help menus, including **Check for Updates…**
 - **Auto-Updates** — background and user-initiated checks, with download progress and errors surfaced to the UI
-- **Native Notifications** — OS notifications and a dock/taskbar unread badge, driven by the web app
+- **Native Notifications** — OS notifications and an unread badge, driven by the web app
 - **OS Theme Sync** — follows the system dark/light preference
 - **Deep Linking** — OAuth callbacks via the `episki://` protocol
 - **Offline Handling** — a real error page with retry when the web app can't be reached
@@ -59,7 +59,7 @@ src/
   security.ts       navigation guards, permission + device handlers
   window-state.ts   persisted geometry with display validation
   updater.ts        electron-updater wiring and event forwarding
-  notifications.ts  native notifications and dock/taskbar badge
+  notifications.ts  native notifications and unread badge
   menu.ts           application menu
   offline.ts        connection-failure page
   store.ts          small JSON store (replaces electron-store)
@@ -109,6 +109,15 @@ api?.setBadgeCount(unreadCount)  // 0 clears
 
 Notifications require `app.setAppUserModelId()` to match `appId` in
 `electron-builder.yml` — without it Windows silently drops every toast.
+
+Badge behaviour differs by platform: macOS and Linux show the count
+(`app.setBadgeCount` is macOS/Linux only), while Windows has no numeric badge
+API and gets a taskbar overlay dot with the count as its accessible
+description.
+
+**macOS notifications require a signed build.** An unsigned app is never
+registered with Notification Center, so `showNotification` returns
+`{shown: true}` and nothing is displayed. The badge is unaffected.
 
 ## Auto-Updates
 

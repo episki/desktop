@@ -49,45 +49,41 @@ function isVisibleOnSomeDisplay(bounds: Rectangle): boolean {
 export function restoreWindowState(): WindowState {
   const saved = { ...DEFAULTS, ...getStore().get('windowState') }
 
-  if (saved.x === undefined || saved.y === undefined) {
+  const centered = (width: number, height: number): WindowState => {
     const primary = screen.getPrimaryDisplay().workArea
     return {
       ...saved,
-      width: Math.min(saved.width, primary.width),
-      height: Math.min(saved.height, primary.height),
+      width: Math.min(width, primary.width),
+      height: Math.min(height, primary.height),
       x: undefined,
       y: undefined,
     }
   }
 
-  const bounds: Rectangle = {
+  if (saved.x === undefined || saved.y === undefined) {
+    return centered(saved.width, saved.height)
+  }
+
+  // Pick the display from the saved geometry, then clamp to it, and only then
+  // test visibility. Testing first would let a window pass on its original
+  // width and then be clamped until it no longer intersects any display.
+  const savedBounds: Rectangle = {
     x: saved.x,
     y: saved.y,
     width: saved.width,
     height: saved.height,
   }
+  const target = screen.getDisplayMatching(savedBounds).workArea
+  const width = Math.min(saved.width, target.width)
+  const height = Math.min(saved.height, target.height)
 
-  if (!isVisibleOnSomeDisplay(bounds)) {
-    const primary = screen.getPrimaryDisplay().workArea
+  const finalBounds: Rectangle = { x: saved.x, y: saved.y, width, height }
+  if (!isVisibleOnSomeDisplay(finalBounds)) {
     log.info('[WindowState] Saved position is off-screen, centering instead')
-    return {
-      ...saved,
-      width: Math.min(saved.width, primary.width),
-      height: Math.min(saved.height, primary.height),
-      x: undefined,
-      y: undefined,
-    }
+    return centered(width, height)
   }
 
-  // Clamp to the display the window is actually landing on, not the primary --
-  // a window saved on a large external monitor should not be shrunk to laptop
-  // size just because the laptop happens to be display 1.
-  const target = screen.getDisplayMatching(bounds).workArea
-  return {
-    ...saved,
-    width: Math.min(saved.width, target.width),
-    height: Math.min(saved.height, target.height),
-  }
+  return { ...saved, width, height }
 }
 
 /**

@@ -84,7 +84,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invoke<NotificationResult>('show-notification', request),
   onNotificationActivated: (callback: (data: NotificationActivatedPayload) => void) =>
     on<NotificationActivatedPayload>('notification-activated', callback),
-  /** Unread count for the dock/taskbar badge. Pass 0 to clear. */
+  /**
+   * Unread indicator. macOS and Linux show the number; Windows has no numeric
+   * badge API and gets a taskbar overlay dot instead. Pass 0 to clear.
+   */
   setBadgeCount: (count: number) => send('set-badge-count', count),
 
   // ---- Auto-updater ----
