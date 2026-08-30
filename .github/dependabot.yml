@@ -1,0 +1,28 @@
+# Electron supports only the latest three major versions. Falling behind means
+# running an unpatched Chromium, so this repo tracks updates weekly rather than
+# waiting for a security advisory to force the issue.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      electron:
+        patterns:
+          - electron
+          - electron-builder
+          - electron-updater
+          - electron-log
+      dev-dependencies:
+        dependency-type: development
+        exclude-patterns:
+          - electron
+          - electron-builder
+
+  # Keeps the pinned action SHAs below from going stale.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
