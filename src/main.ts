@@ -357,6 +357,10 @@ function handleDeepLink(url: string): void {
   // to be a full page load.
   if (routePath.startsWith('/auth/')) {
     log.info('[Deep Link] Auth callback, loading from the server:', routePath)
+    // A full navigation tears down the current renderer, so a link arriving
+    // before the new one mounts has to queue rather than be sent into the gap.
+    // did-finish-load restores readiness and flushes the queue.
+    rendererReady = false
     void win.loadURL(`${APP_URL}${payload.path}`)
     focusMainWindow()
     return
