@@ -4,134 +4,220 @@ Electron wrapper for the episki GRC platform.
 
 ## Features
 
-- **Window State Persistence**: Automatically saves and restores window size, position, and maximized state
-- **Native Menu Bar**: Standard application menu with keyboard shortcuts (File, Edit, View, Window, Help)
-- **Auto-Updates**: Automatic update checking and installation with user notifications
-- **OS Theme Sync**: Syncs with system dark/light mode preferences
-- **Deep Linking**: OAuth callback support via `episki://` protocol
-- **Custom Window Controls**: Native macOS traffic lights and custom Windows title bar
+- **Window State Persistence** — size, position, maximized and full-screen state, validated against the current display layout so the window never restores off-screen
+- **Native Menu Bar** — standard File/Edit/View/Window/Help menus, including **Check for Updates…**
+- **Auto-Updates** — background and user-initiated checks, with download progress and errors surfaced to the UI
+- **Native Notifications** — OS notifications and a dock/taskbar unread badge, driven by the web app
+- **OS Theme Sync** — follows the system dark/light preference
+- **Deep Linking** — OAuth callbacks via the `episki://` protocol
+- **Offline Handling** — a real error page with retry when the web app can't be reached
+- **Custom Window Controls** — native macOS traffic lights, custom Windows title bar
 
 ## Development
 
 ### Prerequisites
 
-- Bun or Node.js
-- The main episki web app running (default: `http://localhost:3000`)
+- Bun (or Node.js ≥ 22.12)
 
 ### Setup
 
 ```bash
-# Install dependencies
-bun install
-
-# Run in development mode
+bun install     # also fetches the Electron binary via `install-electron`
 bun run dev
 ```
 
+`bun run dev` loads **production** (`https://app.episki.com`), same as a packaged
+build. The shell has no environment-specific behaviour, so there is nothing to
+gain from pointing it elsewhere by default — and one fewer way for a release to
+ship aimed at the wrong host.
+
+> Electron 44 no longer ships a `postinstall` hook, so this repo runs
+> `install-electron` itself. A plain `bun install --ignore-scripts` will leave
+> you without a runnable Electron binary.
+
 ### Environment Variables
 
-Create a `.env` file in this directory (optional):
+`.env` is read **in development only** — a packaged app is launched from the
+Dock or Start menu with no meaningful working directory, so it is not a
+supported configuration channel for releases.
 
 ```bash
-# App URL (defaults to localhost in dev, episki.app in production)
+# Point the shell at a locally running web app. Dev only; packaged builds
+# always use https://app.episki.com.
 APP_URL=http://localhost:3000
-
-# Node environment
-NODE_ENV=development
 ```
 
-## Building
-
-### macOS
-
-```bash
-bun run build:mac
-```
-
-Outputs:
-- `dist-electron/episki-{version}-universal.dmg`
-- `dist-electron/episki-{version}-universal-mac.zip`
-
-### Windows
-
-```bash
-bun run build:win
-```
-
-Outputs:
-- `dist-electron/episki Setup {version}.exe`
-
-### Linux
-
-```bash
-bun run build:linux
-```
-
-Outputs:
-- `dist-electron/episki-{version}.AppImage`
-- `dist-electron/episki_{version}_amd64.deb`
+Whatever `APP_URL` resolves to is also the single origin allowed to load
+in-window, so the navigation guard follows the override automatically.
 
 ## Architecture
 
-### Main Process (`src/main.ts`)
+```
+src/
+  main.ts           app lifecycle, window, deep links, IPC wiring
+  config.ts         environment, URLs, allowed-origin policy
+  security.ts       navigation guards, permission + device handlers
+  window-state.ts   persisted geometry with display validation
+  updater.ts        electron-updater wiring and event forwarding
+  notifications.ts  native notifications and dock/taskbar badge
+  menu.ts           application menu
+  offline.ts        connection-failure page
+  store.ts          small JSON store (replaces electron-store)
+  log.ts            electron-log setup
+  preload.ts        contextBridge API exposed as window.electronAPI
+  shared/ipc.ts     IPC channel + payload types shared by main and preload
+```
 
-- Window management and state persistence
-- Deep link handling for OAuth
-- Auto-updater configuration
-- Native menu creation
-- IPC handlers
+`src/preload.ts` runs **sandboxed**, so it may only `require('electron')`. It
+uses `import type` from `shared/ipc.ts` (erased at compile time) and repeats
+channel names as string literals typed against those unions. Do not add a
+value import from a relative path to the preload — it will fail at runtime.
 
-### Preload Script (`src/preload.ts`)
+### Renderer integration
 
-- Secure bridge between main and renderer processes
-- Exposes limited Electron APIs via `window.electronAPI`
+The web app consumes `window.electronAPI` via:
 
-### Integration with Web App
+- `app/composables/useElectron.ts`
+- `app/components/electron/WindowControls.vue`
+- `app/components/electron/ThemeSync.vue`
+- `app/components/electron/UpdateNotification.vue`
+- `app/plugins/deep-link.client.ts`
 
-The Electron app loads the web app and provides additional functionality:
+Every `on*` listener returns an unsubscribe function.
 
-- **Window Controls**: `app/components/electron/WindowControls.vue`
-- **Theme Sync**: `app/components/electron/ThemeSync.vue`
-- **Update Notifications**: `app/components/electron/UpdateNotification.vue`
-- **Electron Composable**: `app/composables/useElectron.ts`
+## Notifications
+
+The main process only *renders* notifications; the web app decides when to
+send them, so existing `comm_preferences` (per event, per channel) stay the
+single source of truth.
+
+```ts
+const { api } = useElectron()
+
+if (await api?.notificationsSupported()) {
+  await api.showNotification({
+    title: 'Task assigned to you',
+    body: 'Review CC6.1 evidence',
+    path: '/acme/tasks/1234',   // routed to on click
+  })
+}
+
+api?.onNotificationActivated(({ path }) => path && router.push(path))
+
+api?.setBadgeCount(unreadCount)  // 0 clears
+```
+
+Notifications require `app.setAppUserModelId()` to match `appId` in
+`electron-builder.yml` — without it Windows silently drops every toast.
 
 ## Auto-Updates
 
-Updates are automatically checked:
-- On app startup (after 5 seconds)
-- Every 4 hours while the app is running
+Checked 8 seconds after launch, every 4 hours thereafter, and on demand via
+**Check for Updates…**. Downloads are never automatic; the user confirms.
 
-When an update is available:
-1. User is notified via toast
-2. User can download the update
-3. Progress is shown during download
-4. User can restart to install or postpone
+Events forwarded to the renderer: `update-checking`, `update-available`,
+`update-not-available`, `update-download-progress`, `update-downloaded`,
+`update-error`.
+
+### Release prerequisites
+
+Updates are delivered from GitHub Releases on this repository
+(`publish` in `electron-builder.yml`). Three things have to be true before an
+update reaches a user:
+
+1. **A published release** containing the installers *and* the `latest*.yml`
+   manifests. `bun run release`, or the tag-triggered
+   `.github/workflows/release.yml`, produces both. The manifests are what
+   electron-updater actually reads — installers alone are not enough.
+2. **Anonymous read access to releases.** electron-updater fetches
+   `https://github.com/episki/desktop/releases.atom` without credentials, so the
+   repository has to be publicly readable. If it is ever made private again,
+   move `publish` to a public releases repository or switch the provider to
+   `generic`/`s3`.
+3. **A signed macOS build.** Squirrel.Mac will not apply an update to an
+   unsigned app — it downloads and then does nothing. Signing is not yet
+   configured; see the commented block in `electron-builder.yml` for the
+   certificates and secrets required to enable it. Until then, macOS releases
+   are manual-download only.
+
+Windows signing is also not configured yet, so installs and updates show a
+SmartScreen prompt. Linux `.deb` has no update path; only AppImage does.
+
+### Testing the updater without packaging
+
+```bash
+EPISKI_TEST_UPDATER=1 bun run dev
+```
+
+Reads `dev-app-update.yml` instead of the packaged manifest. Keep that file in
+sync with the `publish` block in `electron-builder.yml`.
 
 ## Deep Linking
 
-The app registers the `episki://` protocol for OAuth callbacks:
+The app registers the `episki://` protocol. OAuth deliberately round-trips
+through the system browser and returns via `episki://auth/callback?code=…`;
+`useConfirmationUrl` picks the right callback URL per environment.
 
-- **Web flow**: Redirects to `https://episki.app/auth/callback?code=...`
-- **Desktop flow**: Redirects to `episki://auth/callback?code=...`
+`episki://auth/callback` parses with host `auth` and pathname `/callback`, so
+the main process folds the host back into the route before handing
+`/auth/callback` to the renderer.
 
-The `useConfirmationUrl` composable automatically detects Electron and uses the appropriate URL.
+## Security
 
-## Configuration Files
+- In-window navigation is restricted by **origin comparison**, not prefix
+  matching. Everything else opens in the system browser, and only
+  `http:`/`https:`/`mailto:` URLs are handed to the OS.
+- Permissions are denied by default; only notifications, sanitized clipboard
+  writes and fullscreen are granted, and only to allowed origins.
+- HID/serial/USB device access is refused outright.
+- `<webview>` attachment is blocked.
+- Notification and badge IPC is rejected unless the sending frame is on an
+  allowed origin.
+- `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.
 
-- `electron-builder.yml`: Build configuration for all platforms
-- `entitlements.mac.plist`: macOS hardened runtime entitlements
-- `icons/`: Platform-specific app icons
-- `tsconfig.json`: TypeScript configuration
+## Building
+
+```bash
+bun run build:mac      # dmg + zip (universal)
+bun run build:win      # nsis (x64 + arm64)
+bun run build:linux    # AppImage + deb (x64)
+bun run release        # builds and publishes to GitHub Releases
+```
+
+Output lands in `dist-electron/`. The macOS **zip** target is what Squirrel.Mac
+consumes — dropping it breaks macOS auto-update even if the DMG is published.
+
+### Icons
+
+`build/icon.png` (1024×1024) is the only icon asset. electron-builder derives
+`.icns`, `.ico` and the Linux PNG set from it at pack time, so a fresh clone
+builds with no extra step. Regenerate it from `icon.svg` with:
+
+```bash
+# macOS draws app icon content in an 824x824 area inside the 1024x1024 canvas.
+# Rendering edge to edge makes the icon sit visibly larger than its neighbours
+# in the dock, so the artwork is rendered at 824 and padded out to 1024.
+rsvg-convert -w 824 -h 824 icon.svg -o /tmp/icon-824.png
+magick -size 1024x1024 xc:none /tmp/icon-824.png -gravity center -composite build/icon.png
+```
+
+## Logs
+
+`electron-log` writes to the platform log directory, surfaced in
+**Help → Open Log File**:
+
+- macOS — `~/Library/Logs/episki/main.log`
+- Windows — `%USERPROFILE%\AppData\Roaming\episki\logs\main.log`
+- Linux — `~/.config/episki/logs/main.log`
 
 ## Publishing
 
-Updates are published via GitHub Releases. Configure in `electron-builder.yml`:
+Bump `version` in `package.json`, then push a tag:
 
-```yaml
-publish:
-  provider: github
-  owner: episki
-  repo: electron
+```bash
+git tag v1.2.3 && git push origin v1.2.3
 ```
 
-Before publishing, update the version in `package.json`.
+`.github/workflows/release.yml` builds on macOS, Windows and Linux runners and
+publishes to GitHub Releases. Signing secrets are stubbed out there, commented,
+ready to enable.
