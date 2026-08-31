@@ -11,10 +11,8 @@ directories:
   # build/icon.png (1024x1024) is the single icon source. electron-builder
   # derives icon.icns, icon.ico and the Linux PNG set from it at pack time, so
   # there is nothing to generate before building from a fresh clone.
-  # Regenerate it from icon.svg with (see README -- the artwork is rendered at
-  # 824 and padded to 1024 so it matches the macOS icon grid):
-  #   rsvg-convert -w 824 -h 824 icon.svg -o /tmp/icon-824.png
-  #   magick -size 1024x1024 xc:none /tmp/icon-824.png -gravity center -composite build/icon.png
+  # Regenerate it from icon.svg (see README) with:
+  #   rsvg-convert -w 1024 -h 1024 icon.svg -o build/icon.png
   buildResources: build
   output: dist-electron
 
