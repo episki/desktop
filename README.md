@@ -219,7 +219,9 @@ squircle, so the icon fills its slot like every other app's; the mark sits at
 the OG image's 135° gradient, and the blue radial glow the site uses behind
 hero artwork). Windows and Linux get the same square tile unmasked.
 
-CI re-renders the SVG and fails if it no longer matches the committed PNG, so the two cannot drift apart unnoticed — the PNG is binary, so nothing else would catch it.
+CI re-renders the SVG and fails if it no longer matches the committed PNG, so
+the two cannot drift apart unnoticed — the PNG is binary, so a review will not
+catch it.
 
 ## Logs
 
