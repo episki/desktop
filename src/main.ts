@@ -180,7 +180,16 @@ function createWindow(): void {
     minHeight: 700,
 
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    trafficLightPosition: isMac ? { x: 16, y: 18 } : undefined,
+    // Centres the traffic lights on the title bar's tab chips. `y` is the top
+    // of the buttons, which are 14px tall; the chips are 32px high inset in a
+    // 44px band, so their centre sits at 22 and the buttons start at
+    // 22 - 14/2 = 15.
+    //
+    // This was 18, which predates the tabs: when the band was an empty drag
+    // strip there was nothing to line up against, so nothing showed that the
+    // buttons sat 6px low. Tied to `--app-titlebar-h` in the web app -- if
+    // that band height changes, this has to move with it.
+    trafficLightPosition: isMac ? { x: 16, y: 15 } : undefined,
     frame: !isWindows,
 
     // Matching the OS theme avoids a bright white flash on launch for dark-mode
