@@ -181,8 +181,8 @@ function createWindow(): void {
 
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     // Centres the traffic lights on the title bar's tab chips. `y` is the top
-    // of the buttons, which are 14px tall; the chips are 32px high inset in a
-    // 44px band, so their centre sits at 22 and the buttons start at
+    // of the buttons, which are 14px tall; the chips render 34px high inset in
+    // a 44px band, so their centre sits at 22 and the buttons start at
     // 22 - 14/2 = 15.
     //
     // This was 18, which predates the tabs: when the band was an empty drag
