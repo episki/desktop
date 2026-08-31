@@ -219,9 +219,19 @@ squircle, so the icon fills its slot like every other app's; the mark sits at
 the OG image's 135° gradient, and the blue radial glow the site uses behind
 hero artwork). Windows and Linux get the same square tile unmasked.
 
-CI re-renders the SVG and fails if it no longer matches the committed PNG, so
-the two cannot drift apart unnoticed — the PNG is binary, so a review will not
-catch it.
+CI re-renders the SVG and compares it to the committed PNG, so the two cannot
+quietly drift apart — the PNG is binary, so a review will not catch it. The
+comparison is perceptual (RMSE) rather than byte-for-byte, because a different
+`librsvg` build encodes the same picture differently and a hash would fail on
+renderer upgrades instead of on drift.
+
+That means a **tolerance**, currently `0.005`: it clears rasteriser noise
+(measured at `0.0018` even across a completely different resampling path) and
+catches every real edit calibrated against — recolouring the mark, shifting the
+background gradient, changing the mark's size or stroke weight, all `0.0079`
+and above. A change smaller than that, such as nudging the glow's opacity by
+`0.05`, will pass; if you make one, re-render by hand. The calibration table
+lives in the `icon` job in `.github/workflows/ci.yml`.
 
 ## Logs
 

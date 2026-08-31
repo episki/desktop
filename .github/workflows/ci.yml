@@ -33,9 +33,30 @@ jobs:
   #
   # Compared perceptually rather than byte for byte: a different librsvg build
   # on the runner produces a different encoding of the same picture, so a hash
-  # check would fail on renderer upgrades instead of on drift. RMSE is 0 for a
-  # matching render and 0.2 for something as small as the mark changing size,
-  # so 0.02 sits far above encoder noise and far below any real change.
+  # check would fail on renderer upgrades instead of on drift.
+  #
+  # The threshold is calibrated against measured edits, because geometry and
+  # colour score very differently -- geometry moves many pixels a long way,
+  # colour moves every pixel a short way, an order of magnitude lower:
+  #
+  #   in sync / PNG re-encode                        0
+  #   2048 -> 1024 resample (rasteriser noise proxy)  0.0018
+  #   glow opacity 0.45 -> 0.40                       0.0041   NOT caught
+  #   mark blue #1c91fe -> #1c8afe                    0.0079
+  #   mark blue -> #2196f3                            0.0147
+  #   background gradient +5/255 on every stop        0.0154
+  #   mark stroke-width 90.78 -> 85                   0.0397
+  #   mark scale 700 -> 680                           0.1035
+  #   mark scale 700 -> 600                           0.2088
+  #
+  # 0.005 sits ~2.7x above the noise proxy -- itself pessimistic, since it
+  # forces a whole different resampling path where a librsvg version bump only
+  # shifts edge antialiasing. An earlier 0.02 was set from the 700 -> 600 case
+  # alone and let every colour change above through green.
+  #
+  # Known blind spot: an opacity tweak as small as 0.45 -> 0.40 scores under
+  # this. Catching it means ~0.003, which trades margin against false failures
+  # on a renderer upgrade.
   icon:
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +80,7 @@ jobs:
             exit 1
           fi
           echo "RMSE vs committed PNG: $rmse"
-          if awk -v r="$rmse" 'BEGIN { exit !(r > 0.02) }'; then
+          if awk -v r="$rmse" 'BEGIN { exit !(r > 0.005) }'; then
             echo "::error file=build/icon.png::build/icon.png does not match icon.svg. Regenerate it: rsvg-convert -w 1024 -h 1024 icon.svg -o build/icon.png"
             exit 1
           fi
