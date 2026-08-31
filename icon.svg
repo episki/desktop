@@ -1,21 +1,53 @@
 <svg
-  width="512"
-  height="512"
-  viewBox="0 0 512 512"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
   xmlns="http://www.w3.org/2000/svg"
 >
-  <path
-    d="M256 45.39L76.751 150.695v210.61L256 466.61l179.249-105.305v-210.61z"
-    fill="#1c91fe"
-    stroke="#1c91fe"
-    stroke-width="90.78"
-    stroke-linejoin="round"
-  />
-  <path
-    d="M352.227 256c0-53.145-43.082-96.227-96.227-96.227S159.773 202.855 159.773 256s43.082 96.227 96.227 96.227 96.227-43.082 96.227-96.227z"
-    fill="#043f67"
-    stroke="#fff"
-    stroke-width="36.312"
-    stroke-linejoin="round"
-  />
+  <!--
+    The packaged app icon. Rendered edge to edge at 1024; see README.
+
+    Full bleed rather than a mark floating on transparency: macOS 26 wraps a
+    transparent icon in its own light plate and insets the artwork inside it,
+    which is what shrank the hexagon to a chip in the middle of a grey tile.
+    Owning the background means the icon reads at the same weight as its
+    neighbours in the dock, and macOS's squircle mask clips the square corners.
+
+    The background is episki.com's: the slate-950 page colour, the 135deg
+    gradient from its OG image, and the blue radial glow the site puts behind
+    hero artwork.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#020618" />
+      <stop offset="0.55" stop-color="#0b1a2e" />
+      <stop offset="1" stop-color="#061224" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#1c91fe" stop-opacity="0.45" />
+      <stop offset="1" stop-color="#1c91fe" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)" />
+  <rect width="1024" height="1024" fill="url(#glow)" />
+
+  <!-- The mark, on its original 512 grid, scaled to 700 and centred. 700 of
+       1024 keeps it inside the macOS icon grid once the squircle is applied. -->
+  <g transform="translate(162 162) scale(1.3672)">
+    <path
+      d="M256 45.39L76.751 150.695v210.61L256 466.61l179.249-105.305v-210.61z"
+      fill="#1c91fe"
+      stroke="#1c91fe"
+      stroke-width="90.78"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M352.227 256c0-53.145-43.082-96.227-96.227-96.227S159.773 202.855 159.773 256s43.082 96.227 96.227 96.227 96.227-43.082 96.227-96.227z"
+      fill="#043f67"
+      stroke="#fff"
+      stroke-width="36.312"
+      stroke-linejoin="round"
+    />
+  </g>
 </svg>

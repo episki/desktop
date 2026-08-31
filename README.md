@@ -203,12 +203,21 @@ consumes — dropping it breaks macOS auto-update even if the DMG is published.
 builds with no extra step. Regenerate it from `icon.svg` with:
 
 ```bash
-# macOS draws app icon content in an 824x824 area inside the 1024x1024 canvas.
-# Rendering edge to edge makes the icon sit visibly larger than its neighbours
-# in the dock, so the artwork is rendered at 824 and padded out to 1024.
-rsvg-convert -w 824 -h 824 icon.svg -o /tmp/icon-824.png
-magick -size 1024x1024 xc:none /tmp/icon-824.png -gravity center -composite build/icon.png
+rsvg-convert -w 1024 -h 1024 icon.svg -o build/icon.png
 ```
+
+`icon.svg` is the whole icon, background included, and renders edge to edge.
+That is deliberate. The artwork used to be the bare hexagon on transparency,
+rendered at 824 and padded out to 1024 to sit inside the macOS icon grid — which
+looked right in development, where the dock shows the PNG as given. macOS 26
+does not: it wraps a transparent icon in its own light plate and insets the
+artwork *again*, so the shipped icon was a small hexagon adrift in a grey tile.
+
+Owning the background is what fixes it. macOS masks the square canvas to its
+squircle, so the icon fills its slot like every other app's; the mark sits at
+700 of 1024, inside the grid, and the background is episki.com's (slate-950,
+the OG image's 135° gradient, and the blue radial glow the site uses behind
+hero artwork). Windows and Linux get the same square tile unmasked.
 
 ## Logs
 

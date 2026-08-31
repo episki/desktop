@@ -141,6 +141,12 @@ function onReady(): void {
   // A packaged build takes its icon from the app bundle, which electron-builder
   // generates from build/icon.png. In development the process is Electron.app,
   // so the dock shows Electron's own icon unless we override it here.
+  //
+  // This is a preview, not the real thing: build/icon.png is a full-bleed
+  // square, and macOS only applies its squircle mask to a bundle's icon, not to
+  // one handed to the dock tile at runtime. So judge the icon from a packaged
+  // build. Trusting the dev dock is what shipped a hexagon adrift in a grey
+  // plate -- see the icon section of the README.
   if (isMac && app.dock) {
     if (isDev) {
       try {
