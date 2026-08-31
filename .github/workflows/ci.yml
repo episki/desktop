@@ -25,6 +25,66 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+  # build/icon.png is a checked-in artifact: committing it is what lets a fresh
+  # clone package without librsvg and ImageMagick installed. The cost is that it
+  # can drift from icon.svg -- edit the SVG, forget to re-render, and the app
+  # ships the old icon while the source says otherwise. Nothing else catches
+  # that, since the PNG is binary and reviews skip it.
+  #
+  # Compared perceptually rather than byte for byte: a different librsvg build
+  # on the runner produces a different encoding of the same picture, so a hash
+  # check would fail on renderer upgrades instead of on drift.
+  #
+  # The threshold is calibrated against measured edits, because geometry and
+  # colour score very differently -- geometry moves many pixels a long way,
+  # colour moves every pixel a short way, an order of magnitude lower:
+  #
+  #   in sync / PNG re-encode                        0
+  #   2048 -> 1024 resample (rasteriser noise proxy)  0.0018
+  #   glow opacity 0.45 -> 0.40                       0.0041   NOT caught
+  #   mark blue #1c91fe -> #1c8afe                    0.0079
+  #   mark blue -> #2196f3                            0.0147
+  #   background gradient +5/255 on every stop        0.0154
+  #   mark stroke-width 90.78 -> 85                   0.0397
+  #   mark scale 700 -> 680                           0.1035
+  #   mark scale 700 -> 600                           0.2088
+  #
+  # 0.005 sits ~2.7x above the noise proxy -- itself pessimistic, since it
+  # forces a whole different resampling path where a librsvg version bump only
+  # shifts edge antialiasing. An earlier 0.02 was set from the 700 -> 600 case
+  # alone and let every colour change above through green.
+  #
+  # Known blind spot: an opacity tweak as small as 0.45 -> 0.40 scores under
+  # this. Catching it means ~0.003, which trades margin against false failures
+  # on a renderer upgrade.
+  icon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install renderer
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends librsvg2-bin imagemagick
+
+      - name: Check build/icon.png matches icon.svg
+        run: |
+          set -euo pipefail
+          rsvg-convert -w 1024 -h 1024 icon.svg -o /tmp/icon-rendered.png
+          # ImageMagick 7 moved `compare` under the `magick` driver.
+          if command -v compare >/dev/null; then cmp_cmd="compare"; else cmp_cmd="magick compare"; fi
+          # `compare` exits non-zero whenever the images differ at all, which
+          # under `set -e` would abort before we get to judge the magnitude.
+          rmse=$($cmp_cmd -metric RMSE /tmp/icon-rendered.png build/icon.png null: 2>&1 || true)
+          rmse=$(printf '%s' "$rmse" | sed -n 's/.*(\([0-9.e-]*\)).*/\1/p')
+          if [ -z "$rmse" ]; then
+            echo "::error file=build/icon.png::Could not compare icon.svg against build/icon.png (differing dimensions?)"
+            exit 1
+          fi
+          echo "RMSE vs committed PNG: $rmse"
+          if awk -v r="$rmse" 'BEGIN { exit !(r > 0.005) }'; then
+            echo "::error file=build/icon.png::build/icon.png does not match icon.svg. Regenerate it: rsvg-convert -w 1024 -h 1024 icon.svg -o build/icon.png"
+            exit 1
+          fi
+
   # A dir-only pack validates electron-builder.yml -- icon generation, the files
   # globs, the app-update.yml manifest -- without publishing anything. A plain
   # typecheck would not have caught the missing icon assets or the wrong
