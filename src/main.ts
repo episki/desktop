@@ -349,6 +349,24 @@ function handleDeepLink(url: string): void {
     path: `${routePath}${parsed.search}${parsed.hash}`,
   }
 
+  // @nuxtjs/supabase performs the PKCE code exchange in server middleware, on a
+  // real request to /auth/callback. Handing the callback to the renderer as an
+  // IPC event makes it a client-side router push, which never reaches the
+  // server: the code is never exchanged, useSupabaseUser() never hydrates, and
+  // the page sits on its loading spinner forever. Auth callbacks therefore have
+  // to be a full page load.
+  if (routePath.startsWith('/auth/')) {
+    log.info('[Deep Link] Auth callback, loading from the server:', routePath)
+    // A full navigation tears down the current renderer, so a link arriving
+    // before the new one mounts has to queue rather than be sent into the gap.
+    // did-finish-load restores readiness and flushes the queue.
+    rendererReady = false
+    void win.loadURL(`${APP_URL}${payload.path}`)
+    focusMainWindow()
+    return
+  }
+
+  // Everything else is an in-app destination, so route without a reload.
   log.info('[Deep Link] Sending to renderer:', redactPath(payload.path))
   win.webContents.send('deep-link', payload)
   focusMainWindow()
