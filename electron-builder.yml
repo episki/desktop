@@ -33,25 +33,28 @@ mac:
   entitlements: entitlements.mac.plist
   entitlementsInherit: entitlements.mac.plist
   # ---------------------------------------------------------------------
-  # CODE SIGNING / NOTARIZATION -- NOT YET CONFIGURED
+  # CODE SIGNING / NOTARIZATION
   #
   # macOS will not apply a Squirrel update to an unsigned app: the update
-  # downloads and then silently fails to install. Until the block below is
-  # enabled, treat macOS releases as manual-download only.
+  # downloads and then silently fails to install. Unsigned builds are also
+  # never registered with Notification Center, so notifications no-op.
   #
-  # To enable:
-  #   1. Apple Developer Program membership ($99/yr).
-  #   2. Create a "Developer ID Application" certificate, export it as .p12.
-  #   3. Create an app-specific password at appleid.apple.com.
-  #   4. Set these in CI (see .github/workflows/release.yml):
-  #        CSC_LINK                     base64 of the .p12
-  #        CSC_KEY_PASSWORD             .p12 password
-  #        APPLE_ID                     Apple ID email
-  #        APPLE_APP_SPECIFIC_PASSWORD  app-specific password
-  #        APPLE_TEAM_ID                10-char team id
-  #   5. Uncomment:
-  # notarize: true
+  # Signing happens whenever CSC_LINK / CSC_KEY_PASSWORD are set (a
+  # "Developer ID Application" .p12, base64-encoded). Notarization runs
+  # after signing whenever the App Store Connect API key env vars are set:
+  #   APPLE_API_KEY      path to the .p8 file
+  #   APPLE_API_KEY_ID   key id
+  #   APPLE_API_ISSUER   issuer uuid
+  # Notarization is only attempted once the app has actually been signed.
+  # With no certificate electron-builder logs "skipped macOS application
+  # code signing" and produces an unsigned build; with a certificate but no
+  # API key it logs "skipped macOS notarization". Either way the build
+  # succeeds, so a local `bun run build:mac` works without credentials.
+  #
+  # .github/workflows/release.yml maps the repository secrets onto those
+  # env vars; see its "Configure macOS signing" step.
   # ---------------------------------------------------------------------
+  notarize: true
 
 win:
   target:

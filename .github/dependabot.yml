@@ -7,6 +7,11 @@ updates:
   # bun.lock alongside package.json. The `npm` ecosystem does not understand
   # bun.lock and leaves it stale, which fails `bun install --frozen-lockfile`
   # in CI.
+  #
+  # Dependabot's bun only reads bun.lock lockfileVersion 1. bun.lock is pinned
+  # to 1 (CI checks it); a lockfile regenerated from scratch by bun >= 1.4
+  # declares 2 and every run here fails with "Unsupported bun.lock
+  # 'lockfileVersion' 2" until the marker is set back.
   - package-ecosystem: bun
     directory: /
     schedule:

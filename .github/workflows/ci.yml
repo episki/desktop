@@ -25,6 +25,20 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      # Dependabot's bundled bun reads bun.lock lockfileVersion 1 only. bun 1.4
+      # writes 2 when it creates a lockfile from scratch but preserves whatever
+      # version an existing file declares, so this only trips if someone
+      # deletes and regenerates bun.lock -- at which point every weekly
+      # Dependabot run fails and no dependency update ever arrives.
+      - name: Check bun.lock stays Dependabot-readable
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^  "lockfileVersion": \([0-9]*\),$/\1/p' bun.lock)
+          if [ "$version" != "1" ]; then
+            echo "::error file=bun.lock::bun.lock declares lockfileVersion '$version'; Dependabot's bun ecosystem only reads 1. Set the marker back to 1 (the format is otherwise identical) and run 'bun install --frozen-lockfile' to confirm."
+            exit 1
+          fi
+
   # build/icon.png is a checked-in artifact: committing it is what lets a fresh
   # clone package without librsvg and ImageMagick installed. The cost is that it
   # can drift from icon.svg -- edit the SVG, forget to re-render, and the app
