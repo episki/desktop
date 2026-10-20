@@ -8,6 +8,7 @@ import { app } from 'electron'
 if (!app.isPackaged) {
   try {
     // Required lazily: dotenv is a devDependency and is absent from builds.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     ;(require('dotenv') as typeof import('dotenv')).config()
   }
   catch {

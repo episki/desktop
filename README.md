@@ -194,6 +194,7 @@ bun run build:mac      # dmg + zip (universal)
 bun run build:win      # nsis (x64 + arm64)
 bun run build:linux    # AppImage + deb (x64)
 bun run release        # builds and publishes to GitHub Releases
+bun run lint           # eslint; CI requires it to pass (lintfix to auto-fix)
 ```
 
 Output lands in `dist-electron/`. The macOS **zip** target is what Squirrel.Mac
