@@ -100,7 +100,11 @@ jobs:
 
       # electron-builder.yml sets releaseType: release for local `bun run
       # release`; here it is overridden so nothing is public until `publish`.
+      # bash on every runner: Windows defaults to PowerShell, which splits
+      # `-c.publish.releaseType=draft` at the first dot and hands
+      # electron-builder `.publish.releaseType=draft` as a config file path.
       - name: Build and upload to draft release
+        shell: bash
         run: ${{ matrix.build }} -c.publish.releaseType=draft
         env:
           # Provided automatically; electron-builder uses it to create/update
