@@ -19,6 +19,14 @@ directories:
 files:
   - dist/**/*
 
+# Installer names carry no version, so episki.com links to them through
+# GitHub's permanent github.com/episki/desktop/releases/latest/download/<name>
+# URL with no API lookup. Renaming one breaks episki.com/download/<platform>
+# (shared/desktop/release.ts in episki.com), so change both together.
+# Updates are unaffected: electron-updater reads the latest*.yml manifests,
+# finds the previous blockmap through the version in the release tag's path,
+# and overwrites a version-less AppImage in place.
+
 mac:
   category: public.app-category.business
   target:
@@ -78,7 +86,18 @@ linux:
       arch: [x64]
   category: Office
 
+appImage:
+  artifactName: ${productName}-linux.${ext}
+
+deb:
+  artifactName: ${productName}-linux.${ext}
+
+dmg:
+  artifactName: ${productName}-mac.${ext}
+
 nsis:
+  # One installer carrying both x64 and arm64.
+  artifactName: ${productName}-windows.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
 
