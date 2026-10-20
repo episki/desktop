@@ -170,9 +170,15 @@ jobs:
           fi
           # komac can only update a package that is already in winget-pkgs; the
           # first version was submitted by hand.
-          if ! gh api repos/microsoft/winget-pkgs/contents/manifests/e/episki/episki >/dev/null 2>&1; then
-            echo "::warning::episki.episki is not in winget-pkgs yet; skipping."
-            exit 0
+          # Only a 404 means "not there yet"; a rate limit or outage must fail
+          # the job so the missed submission is visible and can be re-run.
+          if ! err=$(gh api repos/microsoft/winget-pkgs/contents/manifests/e/episki/episki 2>&1 >/dev/null); then
+            if grep -q 'HTTP 404' <<<"$err"; then
+              echo "::warning::episki.episki is not in winget-pkgs yet; skipping."
+              exit 0
+            fi
+            echo "$err" >&2
+            exit 1
           fi
 
           archive="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
