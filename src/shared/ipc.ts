@@ -9,36 +9,36 @@
  */
 
 /** Channels the main process sends to the renderer. */
-export type MainToRenderer =
-  | 'deep-link'
-  | 'theme-updated'
-  | 'window-maximized-change'
-  | 'window-fullscreen-change'
-  | 'update-checking'
-  | 'update-available'
-  | 'update-not-available'
-  | 'update-download-progress'
-  | 'update-downloaded'
-  | 'update-error'
-  | 'notification-activated'
+export type MainToRenderer
+  = | 'deep-link'
+    | 'theme-updated'
+    | 'window-maximized-change'
+    | 'window-fullscreen-change'
+    | 'update-checking'
+    | 'update-available'
+    | 'update-not-available'
+    | 'update-download-progress'
+    | 'update-downloaded'
+    | 'update-error'
+    | 'notification-activated'
 
 /** Fire-and-forget channels the renderer sends to the main process. */
-export type RendererToMain =
-  | 'window-minimize'
-  | 'window-maximize'
-  | 'window-close'
-  | 'download-update'
-  | 'install-update'
-  | 'check-for-updates'
-  | 'retry-load'
-  | 'set-badge-count'
+export type RendererToMain
+  = | 'window-minimize'
+    | 'window-maximize'
+    | 'window-close'
+    | 'download-update'
+    | 'install-update'
+    | 'check-for-updates'
+    | 'retry-load'
+    | 'set-badge-count'
 
 /** Request/response channels the renderer invokes on the main process. */
-export type RendererInvoke =
-  | 'window-is-maximized'
-  | 'app-info'
-  | 'notifications-supported'
-  | 'show-notification'
+export type RendererInvoke
+  = | 'window-is-maximized'
+    | 'app-info'
+    | 'notifications-supported'
+    | 'show-notification'
 
 export interface DeepLinkPayload {
   url: string

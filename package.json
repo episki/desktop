@@ -9,22 +9,28 @@
     "postinstall": "install-electron",
     "compile": "tsc",
     "typecheck": "tsc --noEmit",
-    "dev": "npm run compile && unset ELECTRON_RUN_AS_NODE && electron .",
-    "build": "npm run compile && electron-builder --publish never",
-    "build:mac": "npm run compile && electron-builder --mac --publish never",
-    "build:win": "npm run compile && electron-builder --win --publish never",
-    "build:linux": "npm run compile && electron-builder --linux --publish never",
-    "release": "npm run compile && electron-builder --publish always"
+    "dev": "bun run compile && unset ELECTRON_RUN_AS_NODE && electron .",
+    "build": "bun run compile && electron-builder --publish never",
+    "build:mac": "bun run compile && electron-builder --mac --publish never",
+    "build:win": "bun run compile && electron-builder --win --publish never",
+    "build:linux": "bun run compile && electron-builder --linux --publish never",
+    "release": "bun run compile && electron-builder --publish always",
+    "lint": "eslint",
+    "lintfix": "eslint --fix"
   },
   "dependencies": {
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^24.19.2",
     "dotenv": "^18.0.8",
     "electron": "^44.8.0",
     "electron-builder": "^26.15.3",
-    "typescript": "^5.9.3"
+    "eslint": "^10.13.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.0"
   }
 }

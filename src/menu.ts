@@ -13,21 +13,21 @@ export function createMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? [{
-          label: app.name,
-          submenu: [
-            { role: 'about' as const },
-            { type: 'separator' as const },
-            checkForUpdatesItem,
-            { type: 'separator' as const },
-            { role: 'services' as const },
-            { type: 'separator' as const },
-            { role: 'hide' as const },
-            { role: 'hideOthers' as const },
-            { role: 'unhide' as const },
-            { type: 'separator' as const },
-            { role: 'quit' as const },
-          ],
-        } satisfies MenuItemConstructorOptions]
+        label: app.name,
+        submenu: [
+          { role: 'about' as const },
+          { type: 'separator' as const },
+          checkForUpdatesItem,
+          { type: 'separator' as const },
+          { role: 'services' as const },
+          { type: 'separator' as const },
+          { role: 'hide' as const },
+          { role: 'hideOthers' as const },
+          { role: 'unhide' as const },
+          { type: 'separator' as const },
+          { role: 'quit' as const },
+        ],
+      } satisfies MenuItemConstructorOptions]
       : []),
     {
       label: 'File',
@@ -106,9 +106,9 @@ export function createMenu(): void {
         ...(isDev
           ? []
           : [{
-              label: `Version ${app.getVersion()}`,
-              enabled: false,
-            } satisfies MenuItemConstructorOptions]),
+            label: `Version ${app.getVersion()}`,
+            enabled: false,
+          } satisfies MenuItemConstructorOptions]),
       ],
     },
   ]

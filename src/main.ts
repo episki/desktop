@@ -421,7 +421,8 @@ function registerIpcHandlers(): void {
   ipcMain.on('window-maximize', () => {
     const win = mainWindow
     if (!win || win.isDestroyed()) return
-    win.isMaximized() ? win.unmaximize() : win.maximize()
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
   })
   ipcMain.on('window-close', () => mainWindow?.close())
   ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized() ?? false)
