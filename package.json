@@ -1,6 +1,6 @@
 {
   "name": "episki",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "episki desktop app",
   "author": "episki <hello@episki.com>",
   "main": "dist/main.js",
