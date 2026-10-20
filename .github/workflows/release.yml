@@ -141,3 +141,57 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  # Opens the winget-pkgs PR for this version (`winget install episki.episki`).
+  #
+  # komac is what vedantmgoyal9/winget-releaser wraps; it is called directly so
+  # the binary is pinned and checksummed rather than installed from an unpinned
+  # @main action while the token below is in scope.
+  #
+  # WINGET_TOKEN: a classic PAT with `public_repo`. komac opens the PR from the
+  # token owner's winget-pkgs fork (justinleapline/winget-pkgs today); winget
+  # PRs have to come from a user's fork, so this cannot be GITHUB_TOKEN.
+  winget:
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      KOMAC_VERSION: 2.16.0
+      KOMAC_SHA256: 7d2707fa6210f2789a3702de49fbd150b736dbf426ee0b9bc8e098736f9fd82d
+    steps:
+      - name: Submit to winget
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::warning::WINGET_TOKEN is not set; skipping the winget submission."
+            exit 0
+          fi
+          # komac can only update a package that is already in winget-pkgs; the
+          # first version was submitted by hand.
+          # Only a 404 means "not there yet"; a rate limit or outage must fail
+          # the job so the missed submission is visible and can be re-run.
+          if ! err=$(gh api repos/microsoft/winget-pkgs/contents/manifests/e/episki/episki 2>&1 >/dev/null); then
+            if grep -q 'HTTP 404' <<<"$err"; then
+              echo "::warning::episki.episki is not in winget-pkgs yet; skipping."
+              exit 0
+            fi
+            echo "$err" >&2
+            exit 1
+          fi
+
+          archive="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/${archive}"
+          echo "${KOMAC_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          komac=$(find "$RUNNER_TEMP" -type f -name komac -perm -u+x | head -1)
+
+          version="${GITHUB_REF_NAME#v}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/episki-windows.exe"
+          GITHUB_TOKEN="$WINGET_TOKEN" "$komac" update episki.episki \
+              --version "$version" \
+              --urls "$url" \
+              --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}" \
+              --submit
