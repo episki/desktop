@@ -115,9 +115,12 @@ Badge behaviour differs by platform: macOS and Linux show the count
 API and gets a taskbar overlay dot with the count as its accessible
 description.
 
-**macOS notifications require a signed build.** An unsigned app is never
-registered with Notification Center, so `showNotification` returns
-`{shown: true}` and nothing is displayed. The badge is unaffected.
+**macOS notifications require a signed build.** An unsigned app (a local
+`bun run build:mac` with no certificate) is never registered with Notification
+Center, so `showNotification` returns `{shown: true}` and nothing is displayed.
+The badge is unaffected. Release builds are signed only when the signing
+secrets are configured — without them the workflow ships an unsigned build and
+warns; see [Signing and notarization](#signing-and-notarization).
 
 ## Auto-Updates
 
@@ -144,12 +147,12 @@ update reaches a user:
    move `publish` to a public releases repository or switch the provider to
    `generic`/`s3`.
 3. **A signed macOS build.** Squirrel.Mac will not apply an update to an
-   unsigned app — it downloads and then does nothing. Signing is not yet
-   configured; see the commented block in `electron-builder.yml` for the
-   certificates and secrets required to enable it. Until then, macOS releases
-   are manual-download only.
+   unsigned app — it downloads and then does nothing. The release workflow
+   signs and notarizes when the secrets described under
+   [Signing and notarization](#signing-and-notarization) are present, and
+   warns in the job log when they are not.
 
-Windows signing is also not configured yet, so installs and updates show a
+Windows signing is not configured yet, so installs and updates show a
 SmartScreen prompt. Linux `.deb` has no update path; only AppImage does.
 
 ### Testing the updater without packaging
@@ -251,5 +254,45 @@ git tag v1.2.3 && git push origin v1.2.3
 ```
 
 `.github/workflows/release.yml` builds on macOS, Windows and Linux runners and
-publishes to GitHub Releases. Signing secrets are stubbed out there, commented,
-ready to enable.
+publishes to GitHub Releases.
+
+### Signing and notarization
+
+macOS builds are signed with a **Developer ID Application** certificate and
+notarized through an **App Store Connect API key**. Both come from the Apple
+Developer account and are supplied to the release workflow as repository
+secrets:
+
+| Secret                 | Value                                                        |
+| ---------------------- | ------------------------------------------------------------ |
+| `MAC_CSC_LINK`         | base64 of the certificate exported as `.p12` from Keychain   |
+| `MAC_CSC_KEY_PASSWORD` | the `.p12` password                                          |
+| `APPLE_API_KEY_P8`     | contents of the API key's `.p8` file                         |
+| `APPLE_API_KEY_ID`     | the key id shown in App Store Connect                        |
+| `APPLE_API_ISSUER`     | the issuer id (a UUID) shown in App Store Connect            |
+
+Creating them:
+
+1. **Certificate.** Developer portal → Certificates → **Developer ID
+   Application**. Only the Account Holder can create this type. Generate the
+   CSR in Keychain Access, upload it, download and install the certificate,
+   then export the certificate *and its private key* as a password-protected
+   `.p12` and `base64 -i cert.p12 | pbcopy`.
+2. **API key.** App Store Connect → Users and Access → Integrations → Team
+   Keys, role **Developer**. The `.p8` downloads once; store it somewhere
+   durable. An API key is used rather than an Apple ID and app-specific
+   password so the pipeline is not tied to one person's login or 2FA.
+
+The workflow only exports these to electron-builder when they are set. With
+no secrets it prints a warning and ships an unsigned build, which installs
+with a Gatekeeper prompt and cannot auto-update. With the certificate but no
+API key it ships signed but un-notarized, which Gatekeeper refuses outright,
+so add all five together.
+
+After the build the workflow runs `codesign --verify` and `spctl --assess` on
+the `.app`, so a bad certificate or rejected notarization fails the release
+rather than surfacing on a customer's machine.
+
+Windows signing is a separate certificate (Azure Trusted Signing is the
+cheapest route and is supported by electron-builder 26) and is not configured;
+the env hooks for it are commented in `release.yml`.
