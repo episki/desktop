@@ -118,8 +118,9 @@ description.
 **macOS notifications require a signed build.** An unsigned app (a local
 `bun run build:mac` with no certificate) is never registered with Notification
 Center, so `showNotification` returns `{shown: true}` and nothing is displayed.
-The badge is unaffected. Release builds are signed; see
-[Signing and notarization](#signing-and-notarization).
+The badge is unaffected. Release builds are signed only when the signing
+secrets are configured — without them the workflow ships an unsigned build and
+warns; see [Signing and notarization](#signing-and-notarization).
 
 ## Auto-Updates
 

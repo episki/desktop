@@ -7,6 +7,12 @@ name: Release
 # electron-builder publishes the installers *and* the latest*.yml manifests that
 # electron-updater reads. Without those manifests the app has nothing to check
 # against, which is why no update has ever been delivered so far.
+#
+# Every platform uploads into a *draft* release, and the `publish` job makes it
+# public only once all of them have built and verified. Otherwise a build that
+# fails verification would already have shipped its artifacts and manifest to
+# every installed client. A manual (workflow_dispatch) run never publishes, so
+# it doubles as a dry run whose draft can be inspected and deleted.
 on:
   push:
     tags:
@@ -92,11 +98,13 @@ jobs:
             echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
           } >> "$GITHUB_ENV"
 
-      - name: Build and publish
-        run: ${{ matrix.build }}
+      # electron-builder.yml sets releaseType: release for local `bun run
+      # release`; here it is overridden so nothing is public until `publish`.
+      - name: Build and upload to draft release
+        run: ${{ matrix.build }} -c.publish.releaseType=draft
         env:
           # Provided automatically; electron-builder uses it to create/update
-          # the GitHub release for the pushed tag.
+          # the draft GitHub release.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # ---- Windows signing (not yet configured) ----
@@ -115,3 +123,15 @@ jobs:
           test -n "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           spctl --assess --type execute --verbose=2 "$app"
+
+  publish:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
