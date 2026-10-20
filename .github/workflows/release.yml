@@ -1,7 +1,9 @@
 name: Release
 
 # Cutting a release:
-#   1. Bump "version" in package.json.
+#   1. Bump "version" in package.json and rewrite build/release-notes.md for
+#      this release (electron-builder puts it in the latest*.yml manifests,
+#      and the app's update prompt shows it). Merge that as a PR.
 #   2. git tag v1.2.3 && git push origin v1.2.3
 #
 # electron-builder publishes the installers *and* the latest*.yml manifests that
