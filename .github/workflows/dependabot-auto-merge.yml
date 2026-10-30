@@ -73,6 +73,17 @@ jobs:
             echo "::notice::Not auto-merging: only devDependency patch/minor and other patch updates merge unattended."
           fi
 
+      # A dependabot refresh can turn an eligible PR ineligible (e.g. the group
+      # picks up an Electron minor) while auto-merge from an earlier run is still
+      # on; --match-head-commit is only checked when auto-merge is enabled.
+      # always() so a failed metadata/policy step also fails safe.
+      - name: Ineligible — stop auto-merging it
+        if: always() && github.actor == 'dependabot[bot]' && steps.policy.outputs.eligible != 'true'
+        run: gh pr merge --disable-auto "$PR_URL" || echo "auto-merge was not enabled"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Approve PR
         if: steps.policy.outputs.eligible == 'true'
         run: gh pr review --approve "$PR_URL"
