@@ -20,8 +20,9 @@
 # Nothing here checks out or runs PR code.
 #
 # Merges run on GITHUB_TOKEN, so they do not trigger push workflows on main
-# (GitHub's recursion guard). Vercel's git integration still deploys them, and
-# dependabot-lockfile.yml also runs on a daily schedule to catch them.
+# (GitHub's recursion guard). Vercel's git integration still deploys them.
+# Dependabot rebases its own PRs that conflict afterwards; comment
+# `@dependabot recreate` to hurry one along (it ignores GITHUB_TOKEN comments).
 name: dependabot auto-merge
 
 on: pull_request_target
