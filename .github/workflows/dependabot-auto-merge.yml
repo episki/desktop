@@ -1,5 +1,6 @@
 # auto-approve and squash-merge low-risk dependabot PRs:
-#   - devDependencies (`direct:development`): patch and minor
+#   - devDependencies (`direct:development`): patch and minor, except
+#     electron and electron-builder (patch only; minors need a human)
 #   - everything else (runtime deps, transitive/indirect, github-actions):
 #     patch only
 # A grouped PR qualifies only if EVERY dependency in it does, judged from
@@ -19,7 +20,8 @@
 # Nothing here checks out or runs PR code.
 #
 # Merges run on GITHUB_TOKEN, so they do not trigger push workflows on main
-# (GitHub's recursion guard). Vercel's git integration still deploys them.
+# (GitHub's recursion guard). Vercel's git integration still deploys them, and
+# dependabot-lockfile.yml also runs on a daily schedule to catch them.
 name: dependabot auto-merge
 
 on: pull_request_target
@@ -63,7 +65,9 @@ jobs:
           eligible="$(echo "$DEPS" | jq -r '
             length > 0 and all(.[];
               .updateType == "version-update:semver-patch"
-              or (.dependencyType == "direct:development" and .updateType == "version-update:semver-minor"))')"
+              or (.dependencyType == "direct:development"
+                  and .updateType == "version-update:semver-minor"
+                  and (.dependencyName | IN("electron", "electron-builder") | not)))')"
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
           if [ "$eligible" != "true" ]; then
             echo "::notice::Not auto-merging: only devDependency patch/minor and other patch updates merge unattended."
