@@ -1,12 +1,18 @@
 # When bun.lock changes on main (e.g. a dependabot PR merges), this
 # workflow comments @dependabot recreate on any remaining dependabot
 # PRs that now have merge conflicts, so they get rebased automatically.
+#
+# Merges made by dependabot-auto-merge.yml run on GITHUB_TOKEN and do not
+# fire push workflows, so the daily schedule is what catches those.
 name: dependabot lockfile fix
 
 on:
   push:
     branches: [main]
     paths: [bun.lock]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,9 +24,22 @@ jobs:
     steps:
       - name: Recreate conflicting dependabot PRs
         run: |
-          prs=$(gh pr list --author 'app/dependabot' --state open \
-            --json number,mergeable \
-            --jq '.[] | select(.mergeable == "CONFLICTING") | .number')
+          # GitHub reports mergeable as UNKNOWN while it recomputes conflicts
+          # after main moves; poll until every PR has settled.
+          for attempt in $(seq 1 10); do
+            states=$(gh pr list --author 'app/dependabot' --state open \
+              --json number,mergeable)
+            unknown=$(echo "$states" | jq '[.[] | select(.mergeable == "UNKNOWN")] | length')
+            [ "$unknown" -eq 0 ] && break
+            echo "$unknown PR(s) still UNKNOWN (attempt $attempt), waiting"
+            sleep 15
+          done
+
+          if [ "$unknown" -ne 0 ]; then
+            echo "::warning::$unknown dependabot PR(s) still have UNKNOWN mergeability; the next run will retry them."
+          fi
+
+          prs=$(echo "$states" | jq -r '.[] | select(.mergeable == "CONFLICTING") | .number')
 
           if [ -z "$prs" ]; then
             echo "No conflicting dependabot PRs"
