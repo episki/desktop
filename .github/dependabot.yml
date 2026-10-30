@@ -36,7 +36,7 @@ updates:
       - dependency-name: typescript
         update-types: [version-update:semver-major]
       # @types/node should match the Node that Electron actually bundles
-      # (Electron 44 -> Node 22 -> types 24). Bump it together with Electron
+      # (Electron 45 -> Node 24 -> types 24). Bump it together with Electron
       # rather than independently.
       - dependency-name: "@types/node"
         update-types: [version-update:semver-major]
