@@ -33,10 +33,11 @@
   <rect width="1024" height="1024" fill="url(#bg)" />
   <rect width="1024" height="1024" fill="url(#glow)" />
 
-  <!-- The mark, on its original 512 grid, scaled to 896 and centred. The
-       hexagon's points stay 64 clear of the edge, so it keeps a navy margin
-       once macOS applies its squircle mask; 700 read as undersized in the dock. -->
-  <g transform="translate(64 64) scale(1.75)">
+  <!-- The mark, on its original 512 grid, scaled to 768 and centred. The
+       hexagon's points stay 128 clear of the edge, so it keeps a navy margin
+       once macOS applies its squircle mask; 896 crowded the mask and 700 read
+       as undersized in the dock. -->
+  <g transform="translate(128 128) scale(1.5)">
     <path
       d="M256 45.39L76.751 150.695v210.61L256 466.61l179.249-105.305v-210.61z"
       fill="#1c91fe"
